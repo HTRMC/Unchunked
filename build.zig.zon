@@ -1,0 +1,37 @@
+.{
+    .name = .Unchunked,
+    .version = "0.0.0",
+    .fingerprint = 0xb94888bcce9dc4fb,
+    .minimum_zig_version = "0.16.0-dev.2905+5d71e3051",
+    .dependencies = .{
+        // Headers (shared across all platforms)
+        .unchunked_deps_headers = .{
+            .url = "https://github.com/HTRMC/Unchunked-Libs/releases/download/v0.0.1/unchunked_deps_headers.tar.gz",
+            .hash = "N-V-__8AALFOOQFo-v5aMGEYey9b6g5VYiFSwom6397rFOQK",
+            .lazy = true,
+        },
+        // Windows x86_64
+        .@"unchunked_deps_x86_64-windows-gnu" = .{
+            .url = "https://github.com/HTRMC/Unchunked-Libs/releases/download/v0.0.1/unchunked_deps_x86_64-windows-gnu.tar.gz",
+            .hash = "N-V-__8AAAxGbAGhMXNXOp-jFJkCECVqASSfF3QcojgkQyH5",
+            .lazy = true,
+        },
+        // Linux x86_64
+        .@"unchunked_deps_x86_64-linux-gnu" = .{
+            .url = "https://github.com/HTRMC/Unchunked-Libs/releases/download/v0.0.1/unchunked_deps_x86_64-linux-gnu.tar.gz",
+            .hash = "N-V-__8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAc",
+            .lazy = true,
+        },
+        // Linux aarch64
+        .@"unchunked_deps_aarch64-linux-gnu" = .{
+            .url = "https://github.com/HTRMC/Unchunked-Libs/releases/download/v0.0.1/unchunked_deps_aarch64-linux-gnu.tar.gz",
+            .hash = "N-V-__8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAd",
+            .lazy = true,
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
