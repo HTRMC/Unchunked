@@ -5,23 +5,21 @@ const vk = @import("../platform/volk.zig");
 const Window = @import("../platform/Window.zig").Window;
 const Renderer = @import("../renderer/Renderer.zig");
 const QuadRenderer = @import("../renderer/QuadRenderer.zig");
+const TextRenderer = @import("../renderer/TextRenderer.zig");
 const Camera = @import("Camera.zig");
 const Selection = @import("Selection.zig");
 const World = @import("../world/World.zig");
+const Ui = @import("Ui.zig");
 const file_dialog = @import("file_dialog.zig");
-const block_colors = @import("../world/block_colors.zig");
 
 const App = @This();
 
-const State = enum {
-    no_world,
-    viewing,
-    confirm_delete,
-};
+const State = Ui.State;
 
 window: *Window,
 renderer: Renderer,
 quad_renderer: QuadRenderer,
+text_renderer: TextRenderer,
 camera: Camera,
 selection: Selection,
 world: ?World,
@@ -29,7 +27,6 @@ allocator: std.mem.Allocator,
 io: std.Io,
 environ_map: *std.process.Environ.Map,
 state: State = .no_world,
-title_buf: [512]u8 = undefined,
 mouse_x: f64 = 0,
 mouse_y: f64 = 0,
 left_down: bool = false,
@@ -40,6 +37,7 @@ is_dragging: bool = false,
 pub fn init(allocator: std.mem.Allocator, io: std.Io, environ_map: *std.process.Environ.Map, window: *Window) !App {
     var renderer = try Renderer.init(window);
     const quad_renderer = try QuadRenderer.init(&renderer);
+    const text_renderer = try TextRenderer.init(&renderer);
 
     const fb = window.getFramebufferSize();
 
@@ -47,6 +45,7 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, environ_map: *std.process.
         .window = window,
         .renderer = renderer,
         .quad_renderer = quad_renderer,
+        .text_renderer = text_renderer,
         .camera = .{
             .viewport_width = @floatFromInt(fb.width),
             .viewport_height = @floatFromInt(fb.height),
@@ -72,6 +71,7 @@ pub fn setupCallbacks(self: *App) void {
 
 pub fn deinit(self: *App) void {
     vk.deviceWaitIdle(self.renderer.device) catch {};
+    self.text_renderer.deinit();
     self.quad_renderer.deinit();
     self.renderer.deinit();
     self.selection.deinit();
@@ -93,7 +93,6 @@ pub fn openWorld(self: *App, path: []const u8) void {
     self.selection.clear();
     self.camera.center_x = 0;
     self.camera.center_z = 0;
-    self.updateTitle();
 
     std.log.info("Opened world: {s} ({} chunks)", .{
         World.extractWorldName(path),
@@ -192,7 +191,7 @@ pub fn update(self: *App) !void {
     };
     vk.cmdSetScissor(cmd, 0, 1, @ptrCast(&scissor));
 
-    // Emit quads
+    // Emit world quads
     self.quad_renderer.beginFrame();
     self.renderChunkMap();
     self.renderGridOverlays();
@@ -201,6 +200,21 @@ pub fn update(self: *App) !void {
 
     var view_proj = self.camera.getViewProjection();
     self.quad_renderer.flush(cmd, &view_proj, self.renderer.current_frame);
+
+    // UI overlay (screen-space)
+    const vw: f32 = @floatFromInt(ctx.extent.width);
+    const vh: f32 = @floatFromInt(ctx.extent.height);
+
+    // UI backgrounds via quad renderer (screen-space ortho)
+    self.quad_renderer.beginFrame();
+    self.text_renderer.beginFrame();
+
+    const world_ptr: ?*const World = if (self.world) |*w| w else null;
+    Ui.render(&self.quad_renderer, &self.text_renderer, self.state, world_ptr, &self.camera, &self.selection, self.mouse_x, self.mouse_y, vw, vh);
+
+    var screen_proj = screenOrtho(vw, vh);
+    self.quad_renderer.flush(cmd, &screen_proj, self.renderer.current_frame);
+    self.text_renderer.flush(cmd, &screen_proj, self.renderer.current_frame);
 
     vk.cmdEndRendering(cmd);
 
@@ -386,36 +400,14 @@ fn renderBoxSelection(self: *App) void {
     }
 }
 
-fn updateTitle(self: *App) void {
-    const world_cursor = self.camera.screenToWorld(self.mouse_x, self.mouse_y);
-    const block_x: i32 = @intFromFloat(@floor(world_cursor.x * 16));
-    const block_z: i32 = @intFromFloat(@floor(world_cursor.z * 16));
-    const chunk_x: i32 = @intFromFloat(@floor(world_cursor.x));
-    const chunk_z: i32 = @intFromFloat(@floor(world_cursor.z));
-    const region_x = @divFloor(chunk_x, 32);
-    const region_z = @divFloor(chunk_z, 32);
-
-    const world_name = if (self.world) |*w|
-        World.extractWorldName(w.path)
-    else
-        "No world";
-
-    const selected = self.selection.count();
-
-    var title: []u8 = undefined;
-    if (self.state == .confirm_delete) {
-        title = std.fmt.bufPrint(&self.title_buf, "Unchunked — DELETE {d} chunks? Press Y to confirm, N to cancel\x00", .{selected}) catch return;
-    } else if (selected > 0) {
-        title = std.fmt.bufPrint(&self.title_buf, "Unchunked — {s} | Block: {d},{d} | Chunk: {d},{d} | Region: {d},{d} | Selected: {d}\x00", .{
-            world_name, block_x, block_z, chunk_x, chunk_z, region_x, region_z, selected,
-        }) catch return;
-    } else {
-        title = std.fmt.bufPrint(&self.title_buf, "Unchunked — {s} | Block: {d},{d} | Chunk: {d},{d} | Region: {d},{d}\x00", .{
-            world_name, block_x, block_z, chunk_x, chunk_z, region_x, region_z,
-        }) catch return;
-    }
-
-    glfw.setWindowTitle(self.window.handle, @ptrCast(title.ptr));
+fn screenOrtho(width: f32, height: f32) [16]f32 {
+    // Column-major orthographic projection: (0,0) top-left, (w,h) bottom-right
+    return .{
+        2.0 / width, 0,             0,  0,
+        0,           2.0 / height,  0,  0,
+        0,           0,            -1,  0,
+        -1,          -1,            0,  1,
+    };
 }
 
 // GLFW Callbacks
@@ -464,7 +456,7 @@ fn mouseButtonCallback(glfw_window: ?*glfw.Window, button: c_int, action: c_int,
                 } else {
                     app.selection.toggle(cx, cz);
                 }
-                app.updateTitle();
+        
             }
             app.left_down = false;
             app.is_dragging = false;
@@ -474,7 +466,7 @@ fn mouseButtonCallback(glfw_window: ?*glfw.Window, button: c_int, action: c_int,
     if (button == glfw.GLFW_MOUSE_BUTTON_RIGHT and action == glfw.GLFW_PRESS) {
         if (app.selection.count() > 0) {
             app.selection.clear();
-            app.updateTitle();
+    
         }
     }
 }
@@ -501,8 +493,6 @@ fn cursorPosCallback(glfw_window: ?*glfw.Window, xpos: f64, ypos: f64) callconv(
             app.selection.updateBoxSelect(cx, cz);
         }
     }
-
-    app.updateTitle();
 }
 
 fn keyCallback(glfw_window: ?*glfw.Window, key: c_int, _: c_int, action: c_int, mods: c_int) callconv(.c) void {
@@ -521,7 +511,7 @@ fn keyCallback(glfw_window: ?*glfw.Window, key: c_int, _: c_int, action: c_int, 
                     const deleted = world.deleteChunks(chunks) catch |err| {
                         std.log.err("Delete failed: {}", .{err});
                         app.state = .viewing;
-                        app.updateTitle();
+                
                         return;
                     };
 
@@ -529,20 +519,20 @@ fn keyCallback(glfw_window: ?*glfw.Window, key: c_int, _: c_int, action: c_int, 
                     app.selection.clear();
                 }
                 app.state = .viewing;
-                app.updateTitle();
+        
             } else if (key == glfw.GLFW_KEY_N or key == glfw.GLFW_KEY_ESCAPE) {
                 app.state = .viewing;
-                app.updateTitle();
+        
             }
         },
         .viewing => {
             if (key == glfw.GLFW_KEY_DELETE and app.selection.count() > 0) {
                 app.state = .confirm_delete;
-                app.updateTitle();
+        
             } else if (key == glfw.GLFW_KEY_ESCAPE) {
                 if (app.selection.count() > 0) {
                     app.selection.clear();
-                    app.updateTitle();
+            
                 }
             } else if (key == glfw.GLFW_KEY_O and (mods & glfw.GLFW_MOD_CONTROL != 0)) {
                 // Ctrl+O: Open folder dialog
@@ -569,7 +559,7 @@ fn keyCallback(glfw_window: ?*glfw.Window, key: c_int, _: c_int, action: c_int, 
                 const x = std.fmt.parseInt(i32, x_str, 10) catch return;
                 const z = std.fmt.parseInt(i32, z_str, 10) catch return;
                 app.camera.goTo(@floatFromInt(x), @floatFromInt(z));
-                app.updateTitle();
+        
             }
         },
         .no_world => {
