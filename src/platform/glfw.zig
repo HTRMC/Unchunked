@@ -14,8 +14,18 @@ pub const GLFW_TRUE = c.GLFW_TRUE;
 pub const GLFW_FALSE = c.GLFW_FALSE;
 
 pub const GLFW_KEY_ESCAPE = c.GLFW_KEY_ESCAPE;
+pub const GLFW_KEY_DELETE = c.GLFW_KEY_DELETE;
+pub const GLFW_KEY_Y = c.GLFW_KEY_Y;
+pub const GLFW_KEY_N = c.GLFW_KEY_N;
+pub const GLFW_KEY_G = c.GLFW_KEY_G;
+pub const GLFW_KEY_O = c.GLFW_KEY_O;
 pub const GLFW_PRESS = c.GLFW_PRESS;
 pub const GLFW_RELEASE = c.GLFW_RELEASE;
+pub const GLFW_MOD_SHIFT = c.GLFW_MOD_SHIFT;
+pub const GLFW_MOD_CONTROL = c.GLFW_MOD_CONTROL;
+pub const GLFW_MOUSE_BUTTON_LEFT = c.GLFW_MOUSE_BUTTON_LEFT;
+pub const GLFW_MOUSE_BUTTON_RIGHT = c.GLFW_MOUSE_BUTTON_RIGHT;
+pub const GLFW_MOUSE_BUTTON_MIDDLE = c.GLFW_MOUSE_BUTTON_MIDDLE;
 
 pub const GlfwError = error{
     InitFailed,
@@ -73,6 +83,26 @@ pub fn setKeyCallback(window: *Window, callback: ?*const fn (?*Window, c_int, c_
 
 pub fn setFramebufferSizeCallback(window: *Window, callback: ?*const fn (?*Window, c_int, c_int) callconv(.c) void) void {
     _ = c.glfwSetFramebufferSizeCallback(window, callback);
+}
+
+pub fn setScrollCallback(window: *Window, callback: ?*const fn (?*Window, f64, f64) callconv(.c) void) void {
+    _ = c.glfwSetScrollCallback(window, callback);
+}
+
+pub fn setMouseButtonCallback(window: *Window, callback: ?*const fn (?*Window, c_int, c_int, c_int) callconv(.c) void) void {
+    _ = c.glfwSetMouseButtonCallback(window, callback);
+}
+
+pub fn setCursorPosCallback(window: *Window, callback: ?*const fn (?*Window, f64, f64) callconv(.c) void) void {
+    _ = c.glfwSetCursorPosCallback(window, callback);
+}
+
+pub fn getCursorPos(window: *Window, xpos: *f64, ypos: *f64) void {
+    c.glfwGetCursorPos(window, xpos, ypos);
+}
+
+pub fn setWindowTitle(window: *Window, title: [*:0]const u8) void {
+    c.glfwSetWindowTitle(window, title);
 }
 
 pub fn setWindowUserPointer(window: *Window, pointer: anytype) void {
