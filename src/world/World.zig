@@ -44,7 +44,6 @@ const RegionKeyContext = struct {
 
 const LoadJob = struct {
     region: *Region,
-    header: mca.RegionHeader,
     mca_path: []u8,
     allocator: std.mem.Allocator,
     key: RegionKey,
@@ -138,7 +137,11 @@ pub fn scanRegions(self: *World) !void {
 
 fn loadJobWorker(job: *LoadJob) void {
     const io = Io.Threaded.global_single_threaded.io();
-    job.region.loadPixels(job.allocator, io, job.mca_path, &job.header);
+    const header = mca.readRegionHeader(io, job.mca_path) catch {
+        job.done.store(true, .release);
+        return;
+    };
+    job.region.loadPixels(job.allocator, io, job.mca_path, &header);
     job.done.store(true, .release);
 }
 
@@ -207,18 +210,12 @@ pub fn loadRegions(
             region_path, std.fs.path.sep, rk.x, rk.z,
         }) catch continue;
 
-        const header = mca.readRegionHeader(self.io, mca_path) catch {
-            self.allocator.free(mca_path);
-            continue;
-        };
-
         const job = self.allocator.create(LoadJob) catch {
             self.allocator.free(mca_path);
             continue;
         };
         job.* = .{
             .region = region,
-            .header = header,
             .mca_path = mca_path,
             .allocator = self.allocator,
             .key = rk,
