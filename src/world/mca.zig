@@ -75,6 +75,68 @@ pub fn deleteChunks(
     _ = file.writePositionalAll(io, &ts_bytes, 4096) catch return;
 }
 
+pub fn readChunkNbt(allocator: std.mem.Allocator, io: Io, path: []const u8, header: *const RegionHeader, local_x: u5, local_z: u5) ?DecompressResult {
+    const loc = header.locations[chunkIndex(local_x, local_z)];
+    if (loc == 0) return null;
+
+    const sector_offset: u64 = @as(u64, (loc >> 8) & 0xFFFFFF) * SECTOR_SIZE;
+
+    const file = Dir.openFile(.cwd(), io, path, .{}) catch return null;
+    defer file.close(io);
+
+    // Read chunk header: 4-byte length + 1-byte compression type
+    var chunk_header: [5]u8 = undefined;
+    _ = file.readPositionalAll(io, &chunk_header, sector_offset) catch return null;
+
+    const data_length = std.mem.readInt(u32, chunk_header[0..4], .big);
+    const compression_type = chunk_header[4];
+
+    if (data_length <= 1) return null;
+
+    // Read compressed data
+    const compressed_size: usize = data_length - 1;
+    const compressed = allocator.alloc(u8, compressed_size) catch return null;
+    defer allocator.free(compressed);
+
+    const read_count = file.readPositionalAll(io, compressed, sector_offset + 5) catch {
+        return null;
+    };
+    if (read_count < compressed_size) return null;
+
+    // Decompress based on compression type
+    return switch (compression_type) {
+        2 => decompressZlib(allocator, compressed), // zlib
+        else => null,
+    };
+}
+
+pub const DecompressResult = struct {
+    data: []u8, // slice into backing allocation
+    backing: []u8, // full allocation for freeing
+};
+
+pub fn decompressZlib(allocator: std.mem.Allocator, compressed: []const u8) ?DecompressResult {
+    if (compressed.len < 6) return null;
+
+    const deflate_data = compressed[2..];
+
+    const flate = std.compress.flate;
+    var in_reader: std.Io.Reader = .fixed(deflate_data);
+    var decomp_buf: [flate.max_window_len]u8 = undefined;
+    var decomp = flate.Decompress.init(&in_reader, .raw, &decomp_buf);
+
+    const max_output = 4 * 1024 * 1024;
+    const output = allocator.alloc(u8, max_output) catch return null;
+
+    var out_writer: std.Io.Writer = .fixed(output);
+    const total = decomp.reader.streamRemaining(&out_writer) catch {
+        allocator.free(output);
+        return null;
+    };
+
+    return .{ .data = output[0..total], .backing = output };
+}
+
 pub fn parseRegionFilename(name: []const u8) ?struct { x: i32, z: i32 } {
     // Parse "r.X.Z.mca"
     if (!std.mem.startsWith(u8, name, "r.")) return null;

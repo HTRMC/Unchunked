@@ -57,6 +57,10 @@ pub fn init(allocator: std.mem.Allocator, io: Io, path: []const u8) World {
 }
 
 pub fn deinit(self: *World) void {
+    var it = self.regions.valueIterator();
+    while (it.next()) |region| {
+        region.deinit(self.allocator);
+    }
     self.regions.deinit();
 }
 
@@ -89,7 +93,8 @@ pub fn scanRegions(self: *World) !void {
             continue;
         };
 
-        const region = Region.loadFromHeader(parsed.x, parsed.z, &header);
+        var region = Region.loadFromHeader(parsed.x, parsed.z, &header);
+        region.loadPixels(self.allocator, self.io, mca_path, &header);
         const key = RegionKey{ .x = parsed.x, .z = parsed.z };
         self.regions.put(key, region) catch continue;
     }

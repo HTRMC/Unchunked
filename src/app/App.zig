@@ -6,6 +6,7 @@ const Window = @import("../platform/Window.zig").Window;
 const Renderer = @import("../renderer/Renderer.zig");
 const QuadRenderer = @import("../renderer/QuadRenderer.zig");
 const TextRenderer = @import("../renderer/TextRenderer.zig");
+const TileRenderer = @import("../renderer/TileRenderer.zig");
 const Camera = @import("Camera.zig");
 const Selection = @import("Selection.zig");
 const World = @import("../world/World.zig");
@@ -20,6 +21,7 @@ window: *Window,
 renderer: Renderer,
 quad_renderer: QuadRenderer,
 text_renderer: TextRenderer,
+tile_renderer: TileRenderer,
 camera: Camera,
 selection: Selection,
 world: ?World,
@@ -38,6 +40,7 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, environ_map: *std.process.
     var renderer = try Renderer.init(window);
     const quad_renderer = try QuadRenderer.init(&renderer);
     const text_renderer = try TextRenderer.init(&renderer);
+    const tile_renderer = try TileRenderer.init(&renderer);
 
     const fb = window.getFramebufferSize();
 
@@ -46,6 +49,7 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, environ_map: *std.process.
         .renderer = renderer,
         .quad_renderer = quad_renderer,
         .text_renderer = text_renderer,
+        .tile_renderer = tile_renderer,
         .camera = .{
             .viewport_width = @floatFromInt(fb.width),
             .viewport_height = @floatFromInt(fb.height),
@@ -71,6 +75,7 @@ pub fn setupCallbacks(self: *App) void {
 
 pub fn deinit(self: *App) void {
     vk.deviceWaitIdle(self.renderer.device) catch {};
+    self.tile_renderer.deinit();
     self.text_renderer.deinit();
     self.quad_renderer.deinit();
     self.renderer.deinit();
@@ -93,6 +98,16 @@ pub fn openWorld(self: *App, path: []const u8) void {
     self.selection.clear();
     self.camera.center_x = 0;
     self.camera.center_z = 0;
+
+    // Upload region pixel data to tile renderer atlas
+    self.tile_renderer.clearSlots();
+    var it = self.world.?.regions.iterator();
+    while (it.next()) |entry| {
+        const region = entry.value_ptr;
+        if (region.pixels) |px| {
+            self.tile_renderer.uploadRegion(region.rx, region.rz, px);
+        }
+    }
 
     std.log.info("Opened world: {s} ({} chunks)", .{
         World.extractWorldName(path),
@@ -191,14 +206,17 @@ pub fn update(self: *App) !void {
     };
     vk.cmdSetScissor(cmd, 0, 1, @ptrCast(&scissor));
 
-    // Emit world quads
+    // Render tile map (textured region quads)
+    var view_proj = self.camera.getViewProjection();
+    self.tile_renderer.beginFrame();
+    self.renderTileMap();
+    self.tile_renderer.flush(cmd, &view_proj, self.renderer.current_frame);
+
+    // Grid + selection overlays
     self.quad_renderer.beginFrame();
-    self.renderChunkMap();
     self.renderGridOverlays();
     self.renderSelection();
     self.renderBoxSelection();
-
-    var view_proj = self.camera.getViewProjection();
     self.quad_renderer.flush(cmd, &view_proj, self.renderer.current_frame);
 
     // UI overlay (screen-space)
@@ -248,41 +266,13 @@ pub fn update(self: *App) !void {
     try self.renderer.endFrame(ctx);
 }
 
-fn renderChunkMap(self: *App) void {
+fn renderTileMap(self: *App) void {
     const world = &(self.world orelse return);
-
-    const range = self.camera.visibleChunkRange();
 
     var it = world.regions.iterator();
     while (it.next()) |entry| {
         const region = entry.value_ptr;
-        const base_cx = region.rx * 32;
-        const base_cz = region.rz * 32;
-
-        for (0..32) |lz| {
-            for (0..32) |lx| {
-                if (region.chunks[lz][lx] != .present) continue;
-
-                const cx: i32 = base_cx + @as(i32, @intCast(lx));
-                const cz: i32 = base_cz + @as(i32, @intCast(lz));
-
-                // Frustum cull
-                if (cx < range.min_x or cx > range.max_x or cz < range.min_z or cz > range.max_z) continue;
-
-                const color = region.colors[lz][lx];
-                self.quad_renderer.drawQuad(
-                    @floatFromInt(cx),
-                    @floatFromInt(cz),
-                    1.0,
-                    1.0,
-                    .{
-                        .r = @as(f32, @floatFromInt(color[0])) / 255.0,
-                        .g = @as(f32, @floatFromInt(color[1])) / 255.0,
-                        .b = @as(f32, @floatFromInt(color[2])) / 255.0,
-                    },
-                );
-            }
-        }
+        self.tile_renderer.drawRegion(region.rx, region.rz);
     }
 }
 
