@@ -1,42 +1,55 @@
 const std = @import("std");
 
 pub const ThreadPool = struct {
+    const QUEUE_SIZE = 8192;
+
     const Job = struct {
         func: *const fn (*anyopaque) void,
         data: *anyopaque,
     };
 
-    const QUEUE_SIZE = 512;
+    // Vyukov bounded MPMC queue — each slot has a sequence counter
+    const Slot = struct {
+        sequence: std.atomic.Value(usize),
+        job: Job,
+    };
+
+    slots: []Slot = undefined,
+    enqueue_pos: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+    dequeue_pos: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 
     threads: []std.Thread,
-    queue: [QUEUE_SIZE]Job = undefined,
-    head: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
-    tail: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+    allocator: std.mem.Allocator,
     shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     active_count: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
-    allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator, thread_count: u32) !ThreadPool {
-        var pool = ThreadPool{
+    pub fn init(self: *ThreadPool, allocator: std.mem.Allocator, thread_count: u32) !void {
+        const slots = try allocator.alloc(Slot, QUEUE_SIZE);
+        for (slots, 0..) |*slot, i| {
+            slot.* = .{
+                .sequence = std.atomic.Value(usize).init(i),
+                .job = undefined,
+            };
+        }
+
+        self.* = .{
+            .slots = slots,
             .threads = try allocator.alloc(std.Thread, thread_count),
             .allocator = allocator,
         };
 
-        for (pool.threads) |*t| {
-            t.* = try std.Thread.spawn(.{}, workerLoop, .{&pool});
+        for (self.threads) |*t| {
+            t.* = try std.Thread.spawn(.{}, workerLoop, .{self});
         }
 
         std.log.info("Thread pool: {} workers", .{thread_count});
-        return pool;
     }
 
     pub fn deinit(self: *ThreadPool) void {
         self.shutdown.store(true, .release);
-
-        for (self.threads) |t| {
-            t.join();
-        }
+        for (self.threads) |t| t.join();
         self.allocator.free(self.threads);
+        self.allocator.free(self.slots);
     }
 
     pub fn submitPtr(self: *ThreadPool, comptime func: anytype, ptr: anytype) void {
@@ -48,16 +61,58 @@ pub const ThreadPool = struct {
             }
         };
 
-        const t = self.tail.load(.acquire);
-        const h = self.head.load(.acquire);
-        const count = if (t >= h) t - h else QUEUE_SIZE - h + t;
-        if (count >= QUEUE_SIZE - 1) return;
+        self.enqueue(.{ .func = Wrapper.call, .data = @ptrCast(@alignCast(ptr)) });
+    }
 
-        self.queue[t % QUEUE_SIZE] = .{
-            .func = Wrapper.call,
-            .data = @ptrCast(@alignCast(ptr)),
-        };
-        self.tail.store((t + 1) % QUEUE_SIZE, .release);
+    fn enqueue(self: *ThreadPool, job: Job) void {
+        var pos = self.enqueue_pos.load(.monotonic);
+        while (true) {
+            const slot = &self.slots[pos % QUEUE_SIZE];
+            const seq = slot.sequence.load(.acquire);
+            const diff = @as(isize, @intCast(seq)) - @as(isize, @intCast(pos));
+
+            if (diff == 0) {
+                // Slot is ready for writing
+                if (self.enqueue_pos.cmpxchgWeak(pos, pos + 1, .acq_rel, .monotonic)) |updated| {
+                    pos = updated;
+                    continue;
+                }
+                slot.job = job;
+                slot.sequence.store(pos + 1, .release);
+                return;
+            } else if (diff < 0) {
+                // Queue is full
+                return;
+            } else {
+                // Another enqueuer beat us, reload
+                pos = self.enqueue_pos.load(.monotonic);
+            }
+        }
+    }
+
+    fn dequeue(self: *ThreadPool) ?Job {
+        var pos = self.dequeue_pos.load(.monotonic);
+        while (true) {
+            const slot = &self.slots[pos % QUEUE_SIZE];
+            const seq = slot.sequence.load(.acquire);
+            const diff = @as(isize, @intCast(seq)) - @as(isize, @intCast(pos + 1));
+
+            if (diff == 0) {
+                // Slot has data ready
+                if (self.dequeue_pos.cmpxchgWeak(pos, pos + 1, .acq_rel, .monotonic)) |updated| {
+                    pos = updated;
+                    continue;
+                }
+                const job = slot.job;
+                slot.sequence.store(pos + QUEUE_SIZE, .release);
+                return job;
+            } else if (diff < 0) {
+                // Queue is empty
+                return null;
+            } else {
+                pos = self.dequeue_pos.load(.monotonic);
+            }
+        }
     }
 
     pub fn threadCount(self: *const ThreadPool) u32 {
@@ -66,18 +121,17 @@ pub const ThreadPool = struct {
 
     pub fn resize(self: *ThreadPool, new_count: u32) void {
         if (new_count == self.threads.len or new_count == 0) return;
-
         self.waitIdle();
-
-        // Shutdown old threads
         self.shutdown.store(true, .release);
         for (self.threads) |t| t.join();
 
-        // Reset
         self.shutdown.store(false, .release);
-        self.head.store(0, .release);
-        self.tail.store(0, .release);
+        self.enqueue_pos.store(0, .release);
+        self.dequeue_pos.store(0, .release);
         self.active_count.store(0, .release);
+        for (self.slots, 0..) |*slot, i| {
+            slot.sequence.store(i, .release);
+        }
         self.allocator.free(self.threads);
 
         self.threads = self.allocator.alloc(std.Thread, new_count) catch return;
@@ -89,35 +143,23 @@ pub const ThreadPool = struct {
 
     pub fn waitIdle(self: *ThreadPool) void {
         while (true) {
-            const h = self.head.load(.acquire);
-            const t = self.tail.load(.acquire);
+            const e = self.enqueue_pos.load(.acquire);
+            const d = self.dequeue_pos.load(.acquire);
             const active = self.active_count.load(.acquire);
-            if (h == t and active == 0) break;
+            if (e == d and active == 0) break;
             std.Thread.yield() catch {};
         }
     }
 
     fn workerLoop(pool: *ThreadPool) void {
         while (!pool.shutdown.load(.acquire)) {
-            const h = pool.head.load(.acquire);
-            const t = pool.tail.load(.acquire);
-
-            if (h == t) {
-                // No work, spin briefly then yield
+            if (pool.dequeue()) |job| {
+                _ = pool.active_count.fetchAdd(1, .acq_rel);
+                job.func(job.data);
+                _ = pool.active_count.fetchSub(1, .acq_rel);
+            } else {
                 std.Thread.yield() catch {};
-                continue;
             }
-
-            // Try to claim a job
-            const next = (h + 1) % QUEUE_SIZE;
-            if (pool.head.cmpxchgWeak(h, next, .acq_rel, .acquire)) |_| {
-                continue; // another thread got it
-            }
-
-            const job = pool.queue[h % QUEUE_SIZE];
-            _ = pool.active_count.fetchAdd(1, .acq_rel);
-            job.func(job.data);
-            _ = pool.active_count.fetchSub(1, .acq_rel);
         }
     }
 };
