@@ -104,6 +104,16 @@ pub const VkRenderingInfo = c.VkRenderingInfo;
 pub const VkRenderingAttachmentInfo = c.VkRenderingAttachmentInfo;
 pub const VkPipelineRenderingCreateInfo = c.VkPipelineRenderingCreateInfo;
 
+// Image/sampler types
+pub const VkImageCreateInfo = c.VkImageCreateInfo;
+pub const VkSampler = c.VkSampler;
+pub const VkSamplerCreateInfo = c.VkSamplerCreateInfo;
+pub const VkDescriptorImageInfo = c.VkDescriptorImageInfo;
+pub const VkBufferImageCopy = c.VkBufferImageCopy;
+pub const VkImageSubresourceLayers = c.VkImageSubresourceLayers;
+pub const VkExtent3D = c.VkExtent3D;
+pub const VkOffset3D = c.VkOffset3D;
+
 // Constants
 pub const VK_SUCCESS = c.VK_SUCCESS;
 pub const VK_TRUE = c.VK_TRUE;
@@ -226,6 +236,26 @@ pub const VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO = c.VK_STRUCTURE_TYPE
 pub const VK_ATTACHMENT_LOAD_OP_CLEAR = c.VK_ATTACHMENT_LOAD_OP_CLEAR;
 pub const VK_ATTACHMENT_LOAD_OP_LOAD = c.VK_ATTACHMENT_LOAD_OP_LOAD;
 pub const VK_ATTACHMENT_STORE_OP_STORE = c.VK_ATTACHMENT_STORE_OP_STORE;
+
+// Image constants
+pub const VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+pub const VK_IMAGE_TYPE_2D = c.VK_IMAGE_TYPE_2D;
+pub const VK_IMAGE_TILING_OPTIMAL = c.VK_IMAGE_TILING_OPTIMAL;
+pub const VK_IMAGE_USAGE_SAMPLED_BIT = c.VK_IMAGE_USAGE_SAMPLED_BIT;
+pub const VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+pub const VK_FORMAT_R8_UNORM = c.VK_FORMAT_R8_UNORM;
+pub const VK_BUFFER_USAGE_TRANSFER_SRC_BIT = c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+pub const VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+pub const VK_FILTER_NEAREST = c.VK_FILTER_NEAREST;
+pub const VK_SAMPLER_MIPMAP_MODE_NEAREST = c.VK_SAMPLER_MIPMAP_MODE_NEAREST;
+pub const VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+pub const VK_BORDER_COLOR_INT_OPAQUE_BLACK = c.VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+pub const VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT = c.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+pub const VK_ACCESS_SHADER_READ_BIT = c.VK_ACCESS_SHADER_READ_BIT;
+pub const VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT = c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+pub const VK_QUEUE_FAMILY_IGNORED = c.VK_QUEUE_FAMILY_IGNORED;
+pub const VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER = c.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
 // Vulkan 1.3 features
 pub const VkPhysicalDeviceVulkan13Features = c.VkPhysicalDeviceVulkan13Features;
@@ -1038,5 +1068,84 @@ pub fn destroyDebugUtilsMessengerEXT(
 ) void {
     if (c.vkDestroyDebugUtilsMessengerEXT) |fn_ptr| {
         fn_ptr(instance, messenger, allocator);
+    }
+}
+
+// Image operations
+pub fn createImage(
+    device: VkDevice,
+    create_info: *const VkImageCreateInfo,
+    allocator: ?*const VkAllocationCallbacks,
+) VulkanError!VkImage {
+    const fn_ptr = c.vkCreateImage orelse return error.FunctionNotLoaded;
+    var image: VkImage = undefined;
+    const result = fn_ptr(device, create_info, allocator, &image);
+    try vkResultToError(result);
+    return image;
+}
+
+pub fn destroyImage(
+    device: VkDevice,
+    image: VkImage,
+    allocator: ?*const VkAllocationCallbacks,
+) void {
+    if (c.vkDestroyImage) |fn_ptr| {
+        fn_ptr(device, image, allocator);
+    }
+}
+
+pub fn getImageMemoryRequirements(
+    device: VkDevice,
+    image: VkImage,
+    memory_requirements: *VkMemoryRequirements,
+) void {
+    if (c.vkGetImageMemoryRequirements) |fn_ptr| {
+        fn_ptr(device, image, memory_requirements);
+    }
+}
+
+pub fn bindImageMemory(
+    device: VkDevice,
+    image: VkImage,
+    memory: VkDeviceMemory,
+    memory_offset: VkDeviceSize,
+) VulkanError!void {
+    const fn_ptr = c.vkBindImageMemory orelse return error.FunctionNotLoaded;
+    const result = fn_ptr(device, image, memory, memory_offset);
+    try vkResultToError(result);
+}
+
+pub fn createSampler(
+    device: VkDevice,
+    create_info: *const VkSamplerCreateInfo,
+    allocator: ?*const VkAllocationCallbacks,
+) VulkanError!VkSampler {
+    const fn_ptr = c.vkCreateSampler orelse return error.FunctionNotLoaded;
+    var sampler: VkSampler = undefined;
+    const result = fn_ptr(device, create_info, allocator, &sampler);
+    try vkResultToError(result);
+    return sampler;
+}
+
+pub fn destroySampler(
+    device: VkDevice,
+    sampler: VkSampler,
+    allocator: ?*const VkAllocationCallbacks,
+) void {
+    if (c.vkDestroySampler) |fn_ptr| {
+        fn_ptr(device, sampler, allocator);
+    }
+}
+
+pub fn cmdCopyBufferToImage(
+    command_buffer: VkCommandBuffer,
+    src_buffer: VkBuffer,
+    dst_image: VkImage,
+    dst_image_layout: c.VkImageLayout,
+    region_count: u32,
+    regions: [*]const VkBufferImageCopy,
+) void {
+    if (c.vkCmdCopyBufferToImage) |fn_ptr| {
+        fn_ptr(command_buffer, src_buffer, dst_image, dst_image_layout, region_count, regions);
     }
 }
