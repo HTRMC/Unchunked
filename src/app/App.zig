@@ -206,14 +206,17 @@ pub fn update(self: *App) !void {
     };
     vk.cmdSetScissor(cmd, 0, 1, @ptrCast(&scissor));
 
-    // Render tile map (textured region quads)
     var view_proj = self.camera.getViewProjection();
+
+    // Render tile map (textured region quads)
     self.tile_renderer.beginFrame();
     self.renderTileMap();
     self.tile_renderer.flush(cmd, &view_proj, self.renderer.current_frame);
 
-    // Grid + selection overlays
-    self.quad_renderer.beginFrame();
+    // Reset SSBO offset for this frame (allows multiple flushes without overwriting)
+    self.quad_renderer.resetFrame();
+
+    // Grid + selection overlays (world-space)
     self.renderGridOverlays();
     self.renderSelection();
     self.renderBoxSelection();
@@ -222,15 +225,12 @@ pub fn update(self: *App) !void {
     // UI overlay (screen-space)
     const vw: f32 = @floatFromInt(ctx.extent.width);
     const vh: f32 = @floatFromInt(ctx.extent.height);
+    var screen_proj = screenOrtho(vw, vh);
 
-    // UI backgrounds via quad renderer (screen-space ortho)
-    self.quad_renderer.beginFrame();
     self.text_renderer.beginFrame();
-
     const world_ptr: ?*const World = if (self.world) |*w| w else null;
     Ui.render(&self.quad_renderer, &self.text_renderer, self.state, world_ptr, &self.camera, &self.selection, self.mouse_x, self.mouse_y, vw, vh);
 
-    var screen_proj = screenOrtho(vw, vh);
     self.quad_renderer.flush(cmd, &screen_proj, self.renderer.current_frame);
     self.text_renderer.flush(cmd, &screen_proj, self.renderer.current_frame);
 
@@ -272,7 +272,9 @@ fn renderTileMap(self: *App) void {
     var it = world.regions.iterator();
     while (it.next()) |entry| {
         const region = entry.value_ptr;
-        self.tile_renderer.drawRegion(region.rx, region.rz);
+        if (region.pixels != null) {
+            self.tile_renderer.drawRegion(region.rx, region.rz);
+        }
     }
 }
 

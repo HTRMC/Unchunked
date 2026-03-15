@@ -12,7 +12,7 @@ pub fn renderChunk(nbt_data: []const u8, pixels: *ChunkPixels) void {
     }
 
     // Track heights for shading
-    var heights: [16][16]i32 = .{.{-64} ** 16} ** 16;
+    var heights: [16][16]i32 = .{.{UNSET_HEIGHT} ** 16} ** 16;
 
     var reader = NbtReader.init(nbt_data);
 
@@ -330,17 +330,27 @@ fn sortSectionsDescending(sections: []SectionData) void {
     }
 }
 
+const UNSET_HEIGHT: i32 = std.math.minInt(i32);
+
 fn applyHeightShading(pixels: *ChunkPixels, heights: *const [16][16]i32) void {
     for (0..16) |z| {
         for (0..16) |x| {
             if (pixels[z][x][3] == 0) continue;
 
             var shade: i32 = 0;
-            // Compare with neighbors for slope shading
-            if (z > 0) shade += heights[z][x] - heights[z - 1][x];
-            if (x > 0) shade += heights[z][x] - heights[z][x - 1];
+            var count: i32 = 0;
+            // Compare with neighbors, only if neighbor has valid height
+            if (z > 0 and heights[z - 1][x] != UNSET_HEIGHT) {
+                shade += heights[z][x] - heights[z - 1][x];
+                count += 1;
+            }
+            if (x > 0 and heights[z][x - 1] != UNSET_HEIGHT) {
+                shade += heights[z][x] - heights[z][x - 1];
+                count += 1;
+            }
 
-            shade = std.math.clamp(shade * 8, -40, 40);
+            if (count == 0) continue;
+            shade = std.math.clamp(shade * 6, -30, 30);
 
             pixels[z][x][0] = @intCast(std.math.clamp(@as(i32, pixels[z][x][0]) + shade, 0, 255));
             pixels[z][x][1] = @intCast(std.math.clamp(@as(i32, pixels[z][x][1]) + shade, 0, 255));

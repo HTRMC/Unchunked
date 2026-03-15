@@ -37,6 +37,7 @@ vertex_buffer: vk.VkBuffer = null,
 vertex_memory: vk.VkDeviceMemory = null,
 mapped_data: ?*anyopaque = null,
 vertex_count: u32 = 0,
+vertex_offset: u32 = 0, // offset into SSBO for current batch
 device: vk.VkDevice = null,
 swapchain_format: vk.VkFormat = vk.VK_FORMAT_B8G8R8A8_SRGB,
 
@@ -61,15 +62,20 @@ pub fn deinit(self: *QuadRenderer) void {
     if (self.vertex_memory != null) vk.freeMemory(self.device, self.vertex_memory, null);
 }
 
+pub fn resetFrame(self: *QuadRenderer) void {
+    self.vertex_offset = 0;
+    self.vertex_count = 0;
+}
+
 pub fn beginFrame(self: *QuadRenderer) void {
     self.vertex_count = 0;
 }
 
 pub fn drawQuad(self: *QuadRenderer, x: f32, y: f32, w: f32, h: f32, color: Color) void {
-    if (self.vertex_count + VERTICES_PER_QUAD > MAX_VERTICES) return;
+    if (self.vertex_offset + self.vertex_count + VERTICES_PER_QUAD > MAX_VERTICES) return;
 
     const base: [*]MapVertex = @ptrCast(@alignCast(self.mapped_data orelse return));
-    const verts = base[self.vertex_count..][0..6];
+    const verts = base[self.vertex_offset + self.vertex_count ..][0..6];
 
     // Two triangles forming a quad
     verts[0] = .{ .px = x, .py = y, .r = color.r, .g = color.g, .b = color.b, .a = color.a };
@@ -107,7 +113,11 @@ pub fn flush(self: *QuadRenderer, cmd: vk.VkCommandBuffer, view_proj: *const [16
         view_proj,
     );
 
-    vk.cmdDraw(cmd, self.vertex_count, 1, 0, 0);
+    vk.cmdDraw(cmd, self.vertex_count, 1, self.vertex_offset, 0);
+
+    // Advance offset so next batch doesn't overwrite this one
+    self.vertex_offset += self.vertex_count;
+    self.vertex_count = 0;
 }
 
 fn createVertexBuffer(self: *QuadRenderer, renderer: *Renderer) !void {
