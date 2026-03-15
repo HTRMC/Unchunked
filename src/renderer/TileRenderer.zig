@@ -54,7 +54,10 @@ graphics_queue: vk.VkQueue = null,
 // Slot allocation
 slot_used: [MAX_TILES]bool = .{false} ** MAX_TILES,
 slot_keys: [MAX_TILES]RegionKey = .{RegionKey{ .rx = 0, .rz = 0 }} ** MAX_TILES,
-next_evict: u32 = 0,
+visible_min_rx: i32 = 0,
+visible_max_rx: i32 = 0,
+visible_min_rz: i32 = 0,
+visible_max_rz: i32 = 0,
 
 const RegionKey = struct { rx: i32, rz: i32 };
 
@@ -87,6 +90,13 @@ pub fn deinit(self: *TileRenderer) void {
     if (self.atlas_image_view != null) vk.destroyImageView(self.device, self.atlas_image_view, null);
     if (self.atlas_image != null) vk.destroyImage(self.device, self.atlas_image, null);
     if (self.atlas_memory != null) vk.freeMemory(self.device, self.atlas_memory, null);
+}
+
+pub fn setVisibleRange(self: *TileRenderer, min_rx: i32, max_rx: i32, min_rz: i32, max_rz: i32) void {
+    self.visible_min_rx = min_rx;
+    self.visible_max_rx = max_rx;
+    self.visible_min_rz = min_rz;
+    self.visible_max_rz = max_rz;
 }
 
 pub fn uploadRegion(self: *TileRenderer, rx: i32, rz: i32, pixels: []const u8) void {
@@ -234,12 +244,19 @@ fn findOrAllocSlot(self: *TileRenderer, rx: i32, rz: i32) ?u32 {
         }
     }
 
-    // Atlas full — evict slot 0 (simple round-robin eviction)
-    // Shift eviction index to spread evictions
-    const evict = self.next_evict % MAX_TILES;
-    self.next_evict += 1;
-    self.slot_keys[evict] = .{ .rx = rx, .rz = rz };
-    return @intCast(evict);
+    // Atlas full — evict an off-screen slot
+    for (0..MAX_TILES) |i| {
+        const k = self.slot_keys[i];
+        if (k.rx < self.visible_min_rx or k.rx > self.visible_max_rx or
+            k.rz < self.visible_min_rz or k.rz > self.visible_max_rz)
+        {
+            self.slot_keys[i] = .{ .rx = rx, .rz = rz };
+            return @intCast(i);
+        }
+    }
+
+    // All slots are visible — can't evict
+    return null;
 }
 
 fn createAtlas(self: *TileRenderer, renderer: *Renderer) !void {

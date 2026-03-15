@@ -286,6 +286,9 @@ fn renderTileMap(self: *App) void {
     const min_rz = @divFloor(range.min_z, 32);
     const max_rz = @divFloor(range.max_z, 32);
 
+    // Tell tile renderer what's visible so it only evicts off-screen slots
+    self.tile_renderer.setVisibleRange(min_rx, max_rx, min_rz, max_rz);
+
     // Load any visible regions that haven't been loaded yet
     var new_keys: std.ArrayListUnmanaged(World.RegionKey) = .empty;
     defer new_keys.deinit(self.allocator);
