@@ -226,10 +226,6 @@ fn createFontTexture(self: *TextRenderer, renderer: *Renderer) !void {
     self.font_ascender = @floatFromInt(max_bearing_y);
     self.font_line_height = @floatFromInt(max_bearing_y + max_descent);
 
-    std.log.info("Font metrics: ascender={d} descent={d} line_height={d} cell={}x{}", .{
-        max_bearing_y, max_descent, max_bearing_y + max_descent, self.cell_width, self.cell_height,
-    });
-
     // Allocate atlas pixel data
     const atlas_size: usize = self.atlas_width * self.atlas_height;
     const atlas_data = std.heap.page_allocator.alloc(u8, atlas_size) catch return error.OutOfHostMemory;
