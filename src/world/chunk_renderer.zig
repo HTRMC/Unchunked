@@ -1,5 +1,6 @@
 const std = @import("std");
 const block_colors = @import("block_colors.zig");
+const biome_colors = @import("biome_colors.zig");
 
 pub const ChunkPixels = [16][16][4]u8; // [z][x][rgba]
 
@@ -72,8 +73,6 @@ fn parseSections(reader: *NbtReader, pixels: *ChunkPixels, heights: *[16][16]i32
     // Sort by Y descending (top-down)
     sortSectionsDescending(sections[0..valid_sections]);
 
-    const DEFAULT_WATER_COLOR = block_colors.Color{ .r = 63, .g = 118, .b = 228 }; // 0x3F76E4
-
     // For each X/Z column, find topmost block with water overlay support
     for (0..16) |z| {
         for (0..16) |x| {
@@ -104,19 +103,25 @@ fn parseSections(reader: *NbtReader, pixels: *ChunkPixels, heights: *[16][16]i32
                     }
 
                     // Solid terrain block found
-                    const terrain_color = block_colors.lookup(block_name) orelse
+                    var terrain_color = block_colors.lookup(block_name) orelse
                         block_colors.Color{ .r = 180, .g = 100, .b = 200 };
+
+                    // Apply biome tint
+                    const biome_name = getBiomeAt(sec, @intCast(x), y, @intCast(z));
+                    terrain_color = applyBiomeTint(terrain_color, block_name, biome_name);
+
                     heights[z][x] = abs_y;
 
                     if (water_height) |wh| {
-                        // Blend water over terrain based on depth
+                        // Blend biome-specific water over terrain based on depth
                         const depth = wh - abs_y;
                         const ratio = 0.5 - 0.5 / 40.0 * @as(f32, @floatFromInt(@min(depth, 40)));
                         const inv_ratio = 1.0 - ratio;
 
-                        const wr: f32 = @floatFromInt(DEFAULT_WATER_COLOR.r);
-                        const wg: f32 = @floatFromInt(DEFAULT_WATER_COLOR.g);
-                        const wb: f32 = @floatFromInt(DEFAULT_WATER_COLOR.b);
+                        const water_color = biome_colors.getBiomeTint(biome_name, .water);
+                        const wr: f32 = @floatFromInt(water_color.r);
+                        const wg: f32 = @floatFromInt(water_color.g);
+                        const wb: f32 = @floatFromInt(water_color.b);
                         const tr: f32 = @floatFromInt(terrain_color.r);
                         const tg: f32 = @floatFromInt(terrain_color.g);
                         const tb: f32 = @floatFromInt(terrain_color.b);
@@ -137,11 +142,33 @@ fn parseSections(reader: *NbtReader, pixels: *ChunkPixels, heights: *[16][16]i32
 
             // Water with no terrain below (deep ocean, void)
             if (water_height != null and !found) {
-                pixels[z][x] = .{ DEFAULT_WATER_COLOR.r, DEFAULT_WATER_COLOR.g, DEFAULT_WATER_COLOR.b, 255 };
+                const wc = biome_colors.DEFAULT_WATER;
+                pixels[z][x] = .{ wc.r, wc.g, wc.b, 255 };
                 heights[z][x] = water_height.?;
             }
         }
     }
+}
+
+fn applyBiomeTint(color: block_colors.Color, block_name: []const u8, biome_name: []const u8) block_colors.Color {
+    // Static tints (biome-independent)
+    if (biome_colors.getStaticTint(block_name)) |tint| {
+        return biome_colors.applyTint(color, tint);
+    }
+
+    // Grass-tinted blocks
+    if (biome_colors.isGrassTinted(block_name)) {
+        const tint = biome_colors.getBiomeTint(biome_name, .grass);
+        return biome_colors.applyTint(color, tint);
+    }
+
+    // Foliage-tinted blocks
+    if (biome_colors.isFoliageTinted(block_name)) {
+        const tint = biome_colors.getBiomeTint(biome_name, .foliage);
+        return biome_colors.applyTint(color, tint);
+    }
+
+    return color;
 }
 
 fn getBlockAt(sec: *const SectionData, x: u4, z: u4, y: i32) ?[]const u8 {
@@ -209,14 +236,21 @@ fn getBlockIndex(sec: *const SectionData, block_index: u32) ?u32 {
 
 const MAX_PALETTE = 256;
 
+const MAX_BIOME_PALETTE = 64;
+
 const SectionData = struct {
     y: i8 = 0,
     palette_names: [MAX_PALETTE][]const u8 = .{""} ** MAX_PALETTE,
     palette_count: u32 = 0,
-    data_offset: usize = 0, // offset into NbtReader.data
-    data_ptr: [*]const u8 = undefined, // pointer to raw NBT data
+    data_ptr: [*]const u8 = undefined,
     data_longs: u32 = 0,
     bits_per_entry: u32 = 0,
+    // Biome data (4x4x4 resolution)
+    biome_palette: [MAX_BIOME_PALETTE][]const u8 = .{""} ** MAX_BIOME_PALETTE,
+    biome_palette_count: u32 = 0,
+    biome_data_ptr: [*]const u8 = undefined,
+    biome_data_longs: u32 = 0,
+    biome_bits_per_entry: u32 = 0,
 };
 
 fn parseSingleSection(reader: *NbtReader) ?SectionData {
@@ -235,8 +269,9 @@ fn parseSingleSection(reader: *NbtReader) ?SectionData {
             sec.y = @bitCast(y_val);
             has_y = true;
         } else if (tag_type == 10 and std.mem.eql(u8, name, "block_states")) {
-            // Compound containing palette + data
             parseBlockStates(reader, &sec);
+        } else if (tag_type == 10 and std.mem.eql(u8, name, "biomes")) {
+            parseBiomes(reader, &sec);
         } else {
             reader.skipTag(tag_type);
         }
@@ -315,6 +350,79 @@ fn parsePaletteEntry(reader: *NbtReader) []const u8 {
         }
     }
     return block_name;
+}
+
+fn parseBiomes(reader: *NbtReader, sec: *SectionData) void {
+    while (!reader.eof()) {
+        const tag_type = reader.readByte() orelse break;
+        if (tag_type == 0) break;
+
+        const name = reader.readShortString() orelse break;
+
+        if (tag_type == 9 and std.mem.eql(u8, name, "palette")) {
+            // List of string tags (biome names)
+            const elem_type = reader.readByte() orelse break;
+            const count = reader.readInt() orelse break;
+
+            if (elem_type != 8) { // must be string
+                var j: i32 = 0;
+                while (j < count) : (j += 1) reader.skipTag(elem_type);
+                continue;
+            }
+
+            var j: u32 = 0;
+            while (j < @as(u32, @intCast(count)) and j < MAX_BIOME_PALETTE) : (j += 1) {
+                sec.biome_palette[j] = reader.readShortString() orelse "";
+            }
+            sec.biome_palette_count = j;
+
+            if (sec.biome_palette_count > 1) {
+                var bits: u32 = 1;
+                const max_idx = sec.biome_palette_count - 1;
+                while ((@as(u32, 1) << @intCast(bits)) <= max_idx) bits += 1;
+                sec.biome_bits_per_entry = bits;
+            }
+        } else if (tag_type == 12 and std.mem.eql(u8, name, "data")) {
+            const count = reader.readInt() orelse break;
+            if (count <= 0) continue;
+            const ucount: u32 = @intCast(count);
+            if (reader.pos + ucount * 8 <= reader.data.len) {
+                sec.biome_data_ptr = reader.data[reader.pos..].ptr;
+                sec.biome_data_longs = ucount;
+                reader.pos += ucount * 8;
+            } else {
+                reader.pos = reader.data.len;
+            }
+        } else {
+            reader.skipTag(tag_type);
+        }
+    }
+}
+
+fn getBiomeAt(sec: *const SectionData, x: u4, y: i32, z: u4) []const u8 {
+    if (sec.biome_palette_count == 0) return "";
+    if (sec.biome_palette_count == 1) return sec.biome_palette[0];
+    if (sec.biome_data_longs == 0) return sec.biome_palette[0];
+
+    // Biomes are 4x4x4 within a 16x16x16 section
+    const bx: u32 = @as(u32, x) >> 2;
+    const by: u32 = @intCast(@as(u32, @intCast(y)) >> 2);
+    const bz: u32 = @as(u32, z) >> 2;
+    const index = by * 16 + bz * 4 + bx;
+
+    const entries_per_long: u32 = 64 / sec.biome_bits_per_entry;
+    const long_index = index / entries_per_long;
+    const bit_offset = (index % entries_per_long) * sec.biome_bits_per_entry;
+
+    if (long_index >= sec.biome_data_longs) return sec.biome_palette[0];
+
+    const byte_offset = long_index * 8;
+    const long_val = std.mem.readInt(u64, sec.biome_data_ptr[byte_offset..][0..8], .big);
+    const mask = (@as(u64, 1) << @intCast(sec.biome_bits_per_entry)) - 1;
+    const palette_idx: u32 = @intCast((long_val >> @intCast(bit_offset)) & mask);
+
+    if (palette_idx >= sec.biome_palette_count) return sec.biome_palette[0];
+    return sec.biome_palette[palette_idx];
 }
 
 fn sortSectionsDescending(sections: []SectionData) void {
