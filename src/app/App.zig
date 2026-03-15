@@ -255,7 +255,7 @@ pub fn update(self: *App) !void {
 
     self.text_renderer.beginFrame();
     const world_ptr: ?*const World = if (self.world) |*w| w else null;
-    Ui.render(&self.quad_renderer, &self.text_renderer, self.state, world_ptr, &self.camera, &self.selection, self.mouse_x, self.mouse_y, vw, vh);
+    Ui.render(&self.quad_renderer, &self.text_renderer, self.state, world_ptr, &self.camera, &self.selection, self.mouse_x, self.mouse_y, vw, vh, self.thread_pool.threadCount());
 
     self.quad_renderer.flush(cmd, &screen_proj, self.renderer.current_frame);
     self.text_renderer.flush(cmd, &screen_proj, self.renderer.current_frame);
@@ -304,7 +304,8 @@ fn processRegionLoading(self: *App) void {
     for (new_keys.items) |key| {
         if (world.getRegion(key.x, key.z)) |region| {
             if (region.pixels) |px| {
-                self.tile_renderer.uploadRegion(key.x, key.z, px);
+                // Non-blocking: if GPU is busy with previous upload, try next frame
+                if (!self.tile_renderer.uploadRegion(key.x, key.z, px)) break;
             }
         }
     }
@@ -603,6 +604,14 @@ fn keyCallback(glfw_window: ?*glfw.Window, key: c_int, _: c_int, action: c_int, 
                     app.openWorld(p);
                     app.allocator.free(p);
                 }
+            } else if (key == glfw.GLFW_KEY_EQUAL) {
+                // + key: increase thread count
+                const cur = app.thread_pool.threadCount();
+                app.thread_pool.resize(@min(cur + 1, 64));
+            } else if (key == glfw.GLFW_KEY_MINUS) {
+                // - key: decrease thread count
+                const cur = app.thread_pool.threadCount();
+                if (cur > 1) app.thread_pool.resize(cur - 1);
             } else if (key == glfw.GLFW_KEY_1) {
                 app.switchDimension(.overworld);
             } else if (key == glfw.GLFW_KEY_2) {

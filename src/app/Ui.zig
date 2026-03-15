@@ -36,9 +36,10 @@ pub fn render(
     mouse_y: f64,
     viewport_w: f32,
     viewport_h: f32,
+    thread_count: u32,
 ) void {
     renderToolbar(qr, tr, state, world, selection, viewport_w);
-    renderStatusBar(qr, tr, state, world, camera, selection, mouse_x, mouse_y, viewport_w, viewport_h);
+    renderStatusBar(qr, tr, state, world, camera, selection, mouse_x, mouse_y, viewport_w, viewport_h, thread_count);
 }
 
 const TAB_COLOR = QuadRenderer.Color{ .r = 0.22, .g = 0.22, .b = 0.24, .a = 0.95 };
@@ -115,6 +116,7 @@ fn renderStatusBar(
     mouse_y: f64,
     viewport_w: f32,
     viewport_h: f32,
+    thread_count: u32,
 ) void {
     _ = state;
     _ = world;
@@ -149,12 +151,26 @@ fn renderStatusBar(
     x += tr.measureText("Region: ", SMALL_TEXT_SCALE);
     tr.drawFmt(x, text_y, SMALL_TEXT_SCALE, TEXT_COLOR, "{d},{d}", .{ region_x, region_z });
 
-    // Right: selection count
+    // Right side: thread count + selection count
+    var right_x = viewport_w - PADDING;
+
+    // Thread count
+    {
+        var buf: [32]u8 = undefined;
+        const txt = std.fmt.bufPrint(&buf, "Threads: {d} (+/-)", .{thread_count}) catch "";
+        const w = tr.measureText(txt, SMALL_TEXT_SCALE);
+        right_x -= w;
+        tr.drawText(txt, right_x, text_y, SMALL_TEXT_SCALE, DIM_TEXT_COLOR);
+        right_x -= PADDING * 2;
+    }
+
+    // Selection count
     const selected = selection.count();
     if (selected > 0) {
         var buf: [64]u8 = undefined;
         const sel_text = std.fmt.bufPrint(&buf, "Selected: {d}", .{selected}) catch return;
         const sel_w = tr.measureText(sel_text, SMALL_TEXT_SCALE);
-        tr.drawText(sel_text, viewport_w - sel_w - PADDING, text_y, SMALL_TEXT_SCALE, ACCENT_COLOR);
+        right_x -= sel_w;
+        tr.drawText(sel_text, right_x, text_y, SMALL_TEXT_SCALE, ACCENT_COLOR);
     }
 }

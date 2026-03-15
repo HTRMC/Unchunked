@@ -111,17 +111,18 @@ pub fn deinit(self: *TileRenderer) void {
     if (self.sampler != null) vk.destroySampler(self.device, self.sampler, null);
 }
 
-pub fn uploadRegion(self: *TileRenderer, rx: i32, rz: i32, pixels: []const u8) void {
+pub fn uploadRegion(self: *TileRenderer, rx: i32, rz: i32, pixels: []const u8) bool {
     const key = RegionKey{ .rx = rx, .rz = rz };
-    if (self.region_textures.contains(key)) return;
-    if (self.next_texture_index >= MAX_TEXTURES) return;
+    if (self.region_textures.contains(key)) return true;
+    if (self.next_texture_index >= MAX_TEXTURES) return false;
 
-    // Wait for previous upload to finish
-    vk.waitForFences(self.device, 1, @ptrCast(&self.upload_fence), vk.VK_TRUE, std.math.maxInt(u64)) catch return;
-    vk.resetFences(self.device, 1, @ptrCast(&self.upload_fence)) catch return;
+    // Non-blocking check: is previous upload done?
+    const result = vk.waitForFences(self.device, 1, @ptrCast(&self.upload_fence), vk.VK_TRUE, 0) catch return false;
+    _ = result;
+    vk.resetFences(self.device, 1, @ptrCast(&self.upload_fence)) catch return false;
 
     // Create region texture
-    const tex = self.createRegionTexture(pixels) orelse return;
+    const tex = self.createRegionTexture(pixels) orelse return false;
     const tex_index = self.next_texture_index;
     self.next_texture_index += 1;
 
@@ -130,7 +131,7 @@ pub fn uploadRegion(self: *TileRenderer, rx: i32, rz: i32, pixels: []const u8) v
         .image_view = tex.image_view,
         .memory = tex.memory,
         .index = tex_index,
-    }) catch return;
+    }) catch return false;
 
     // Update descriptor set to bind this texture at tex_index
     const image_desc: vk.VkDescriptorImageInfo = .{
@@ -154,6 +155,8 @@ pub fn uploadRegion(self: *TileRenderer, rx: i32, rz: i32, pixels: []const u8) v
         };
         vk.updateDescriptorSets(self.device, 1, @ptrCast(&write), 0, null);
     }
+
+    return true;
 }
 
 pub fn clearSlots(self: *TileRenderer) void {

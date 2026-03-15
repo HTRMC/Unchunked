@@ -18,6 +18,8 @@ pub const GLFW_KEY_DELETE = c.GLFW_KEY_DELETE;
 pub const GLFW_KEY_1 = c.GLFW_KEY_1;
 pub const GLFW_KEY_2 = c.GLFW_KEY_2;
 pub const GLFW_KEY_3 = c.GLFW_KEY_3;
+pub const GLFW_KEY_EQUAL = c.GLFW_KEY_EQUAL; // + key (shift+= on US layout)
+pub const GLFW_KEY_MINUS = c.GLFW_KEY_MINUS;
 pub const GLFW_KEY_Y = c.GLFW_KEY_Y;
 pub const GLFW_KEY_N = c.GLFW_KEY_N;
 pub const GLFW_KEY_G = c.GLFW_KEY_G;
