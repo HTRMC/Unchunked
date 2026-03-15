@@ -32,6 +32,9 @@ fn linkDependencies(b: *std.Build, exe: *std.Build.Step.Compile) void {
     exe.root_module.addObjectFile(lib_dep.path(libName(b, "stb_image")));
     exe.root_module.addObjectFile(lib_dep.path(libName(b, "shaderc_combined")));
 
+    // FreeType — compiled from source
+    linkFreetype(b, exe);
+
     if (t.os.tag == .windows) {
         exe.root_module.linkSystemLibrary("gdi32", .{});
         exe.root_module.linkSystemLibrary("user32", .{});
@@ -39,6 +42,69 @@ fn linkDependencies(b: *std.Build, exe: *std.Build.Step.Compile) void {
         exe.root_module.linkSystemLibrary("opengl32", .{});
         exe.root_module.linkSystemLibrary("dwmapi", .{});
     }
+}
+
+fn linkFreetype(b: *std.Build, exe: *std.Build.Step.Compile) void {
+    const target = exe.root_module.resolved_target.?;
+
+    const freetype_dep = b.lazyDependency("freetype", .{}) orelse {
+        std.log.info("Downloading freetype...", .{});
+        return;
+    };
+
+    const freetype_lib = b.addLibrary(.{
+        .name = "freetype",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = .ReleaseFast,
+            .link_libc = true,
+        }),
+    });
+
+    freetype_lib.root_module.addCMacro("FT2_BUILD_LIBRARY", "1");
+    freetype_lib.root_module.addIncludePath(freetype_dep.path("include"));
+
+    const freetype_sources = [_][]const u8{
+        "src/base/ftsystem.c",
+        "src/base/ftinit.c",
+        "src/base/ftdebug.c",
+        "src/base/ftbase.c",
+        "src/base/ftbbox.c",
+        "src/base/ftbitmap.c",
+        "src/base/ftglyph.c",
+        "src/base/ftstroke.c",
+        "src/base/ftsynth.c",
+        "src/base/ftmm.c",
+        "src/truetype/truetype.c",
+        "src/cff/cff.c",
+        "src/cid/type1cid.c",
+        "src/type1/type1.c",
+        "src/type42/type42.c",
+        "src/pfr/pfr.c",
+        "src/winfonts/winfnt.c",
+        "src/pcf/pcf.c",
+        "src/bdf/bdf.c",
+        "src/sfnt/sfnt.c",
+        "src/autofit/autofit.c",
+        "src/pshinter/pshinter.c",
+        "src/raster/raster.c",
+        "src/smooth/smooth.c",
+        "src/psaux/psaux.c",
+        "src/psnames/psnames.c",
+        "src/gzip/ftgzip.c",
+        "src/lzw/ftlzw.c",
+        "src/sdf/sdf.c",
+        "src/svg/svg.c",
+    };
+
+    freetype_lib.root_module.addCSourceFiles(.{
+        .root = freetype_dep.path(""),
+        .files = &freetype_sources,
+    });
+
+    exe.root_module.addIncludePath(freetype_dep.path("include"));
+    exe.root_module.linkLibrary(freetype_lib);
 }
 
 pub fn build(b: *std.Build) void {

@@ -16,6 +16,12 @@
             .hash = "N-V-__8AAAxGbAGhMXNXOp-jFJkCECVqASSfF3QcojgkQyH5",
             .lazy = true,
         },
+        // FreeType (compiled from source)
+        .freetype = .{
+            .url = "https://github.com/freetype/freetype/archive/refs/tags/VER-2-14-2.tar.gz",
+            .hash = "N-V-__8AABFaqgC09zPrCipe8MfLMuMVN0NwM-UerIi1mTgX",
+            .lazy = true,
+        },
         // Linux x86_64
         .@"unchunked_deps_x86_64-linux-gnu" = .{
             .url = "https://github.com/HTRMC/Unchunked-Libs/releases/download/v0.0.1/unchunked_deps_x86_64-linux-gnu.tar.gz",

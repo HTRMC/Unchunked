@@ -9,3 +9,8 @@ pub const c = @cImport({
     @cInclude("shaderc/shaderc.h");
     @cInclude("stb_image.h");
 });
+
+pub const ft = @cImport({
+    @cInclude("ft2build.h");
+    @cInclude("freetype/freetype.h");
+});

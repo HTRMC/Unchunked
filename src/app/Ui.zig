@@ -7,13 +7,13 @@ const World = @import("../world/World.zig");
 
 const Ui = @This();
 
-const TOOLBAR_HEIGHT: f32 = 28;
-const STATUSBAR_HEIGHT: f32 = 24;
-const PADDING: f32 = 8;
-const TEXT_SCALE: f32 = 1.5;
-const SMALL_TEXT_SCALE: f32 = 1.25;
+const TOOLBAR_HEIGHT: f32 = 32;
+const STATUSBAR_HEIGHT: f32 = 28;
+const PADDING: f32 = 10;
+const TEXT_SCALE: f32 = 1.0;
+const SMALL_TEXT_SCALE: f32 = 0.85;
 
-const BG_COLOR = QuadRenderer.Color{ .r = 0.12, .g = 0.12, .b = 0.12, .a = 0.9 };
+const BG_COLOR = QuadRenderer.Color{ .r = 0.12, .g = 0.12, .b = 0.12, .a = 0.92 };
 const TEXT_COLOR = TextRenderer.Color{ .r = 0.9, .g = 0.9, .b = 0.9, .a = 1.0 };
 const DIM_TEXT_COLOR = TextRenderer.Color{ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
 const ACCENT_COLOR = TextRenderer.Color{ .r = 0.4, .g = 0.7, .b = 1.0, .a = 1.0 };
@@ -26,8 +26,8 @@ pub const State = enum {
 };
 
 pub fn render(
-    quad_renderer: *QuadRenderer,
-    text_renderer: *TextRenderer,
+    qr: *QuadRenderer,
+    tr: *TextRenderer,
     state: State,
     world: ?*const World,
     camera: *const Camera,
@@ -37,8 +37,8 @@ pub fn render(
     viewport_w: f32,
     viewport_h: f32,
 ) void {
-    renderToolbar(quad_renderer, text_renderer, state, world, selection, viewport_w);
-    renderStatusBar(quad_renderer, text_renderer, state, world, camera, selection, mouse_x, mouse_y, viewport_w, viewport_h);
+    renderToolbar(qr, tr, state, world, selection, viewport_w);
+    renderStatusBar(qr, tr, state, world, camera, selection, mouse_x, mouse_y, viewport_w, viewport_h);
 }
 
 fn renderToolbar(
@@ -49,10 +49,9 @@ fn renderToolbar(
     selection: *const Selection,
     viewport_w: f32,
 ) void {
-    // Background bar
     qr.drawQuad(0, 0, viewport_w, TOOLBAR_HEIGHT, BG_COLOR);
 
-    const text_y: f32 = (TOOLBAR_HEIGHT - 8 * TEXT_SCALE) / 2;
+    const text_y: f32 = (TOOLBAR_HEIGHT - tr.font_line_height * TEXT_SCALE) / 2;
 
     if (state == .confirm_delete) {
         const selected = selection.count();
@@ -60,22 +59,20 @@ fn renderToolbar(
         return;
     }
 
-    // Left side: world name
+    // Left: app name + world name
+    tr.drawText("Unchunked", PADDING, text_y, TEXT_SCALE, ACCENT_COLOR);
     if (world) |w| {
         const name = World.extractWorldName(w.path);
-        tr.drawText("Unchunked", PADDING, text_y, TEXT_SCALE, ACCENT_COLOR);
-        const sep_x = PADDING + TextRenderer.textWidth("Unchunked", TEXT_SCALE) + PADDING;
-        tr.drawText("|", sep_x, text_y, TEXT_SCALE, DIM_TEXT_COLOR);
-        const name_x = sep_x + TextRenderer.textWidth("|", TEXT_SCALE) + PADDING;
-        tr.drawText(name, name_x, text_y, TEXT_SCALE, TEXT_COLOR);
-    } else {
-        tr.drawText("Unchunked", PADDING, text_y, TEXT_SCALE, ACCENT_COLOR);
+        var x = PADDING + tr.measureText("Unchunked", TEXT_SCALE) + PADDING;
+        tr.drawText("|", x, text_y, TEXT_SCALE, DIM_TEXT_COLOR);
+        x += tr.measureText("|", TEXT_SCALE) + PADDING;
+        tr.drawText(name, x, text_y, TEXT_SCALE, TEXT_COLOR);
     }
 
-    // Right side: shortcuts
+    // Right: shortcuts
     const shortcuts = "Ctrl+O Open  Ctrl+G Goto";
-    const shortcuts_w = TextRenderer.textWidth(shortcuts, SMALL_TEXT_SCALE);
-    const shortcuts_y: f32 = (TOOLBAR_HEIGHT - 8 * SMALL_TEXT_SCALE) / 2;
+    const shortcuts_w = tr.measureText(shortcuts, SMALL_TEXT_SCALE);
+    const shortcuts_y: f32 = (TOOLBAR_HEIGHT - tr.font_line_height * SMALL_TEXT_SCALE) / 2;
     tr.drawText(shortcuts, viewport_w - shortcuts_w - PADDING, shortcuts_y, SMALL_TEXT_SCALE, DIM_TEXT_COLOR);
 }
 
@@ -92,17 +89,12 @@ fn renderStatusBar(
     viewport_h: f32,
 ) void {
     _ = state;
+    _ = world;
     const bar_y = viewport_h - STATUSBAR_HEIGHT;
 
-    // Background bar
     qr.drawQuad(0, bar_y, viewport_w, STATUSBAR_HEIGHT, BG_COLOR);
 
-    const text_y = bar_y + (STATUSBAR_HEIGHT - 8 * SMALL_TEXT_SCALE) / 2;
-
-    if (world == null) {
-        tr.drawText("No world loaded - press Ctrl+O or pass path as argument", PADDING, text_y, SMALL_TEXT_SCALE, DIM_TEXT_COLOR);
-        return;
-    }
+    const text_y = bar_y + (STATUSBAR_HEIGHT - tr.font_line_height * SMALL_TEXT_SCALE) / 2;
 
     // Coordinate display
     const world_pos = camera.screenToWorld(mouse_x, mouse_y);
@@ -113,33 +105,28 @@ fn renderStatusBar(
     const region_x = @divFloor(chunk_x, 32);
     const region_z = @divFloor(chunk_z, 32);
 
-    tr.drawFmt(PADDING, text_y, SMALL_TEXT_SCALE, DIM_TEXT_COLOR, "Block: ", .{});
-    var x_offset = PADDING + TextRenderer.textWidth("Block: ", SMALL_TEXT_SCALE);
-    tr.drawFmt(x_offset, text_y, SMALL_TEXT_SCALE, TEXT_COLOR, "{d},{d}", .{ block_x, block_z });
+    var x: f32 = PADDING;
 
-    x_offset += TextRenderer.textWidth(fmtBuf("{d},{d}", .{ block_x, block_z }), SMALL_TEXT_SCALE) + PADDING;
-    tr.drawFmt(x_offset, text_y, SMALL_TEXT_SCALE, DIM_TEXT_COLOR, "Chunk: ", .{});
-    x_offset += TextRenderer.textWidth("Chunk: ", SMALL_TEXT_SCALE);
-    tr.drawFmt(x_offset, text_y, SMALL_TEXT_SCALE, TEXT_COLOR, "{d},{d}", .{ chunk_x, chunk_z });
+    tr.drawText("Block: ", x, text_y, SMALL_TEXT_SCALE, DIM_TEXT_COLOR);
+    x += tr.measureText("Block: ", SMALL_TEXT_SCALE);
+    tr.drawFmt(x, text_y, SMALL_TEXT_SCALE, TEXT_COLOR, "{d},{d}", .{ block_x, block_z });
+    x += tr.measureFmt(SMALL_TEXT_SCALE, "{d},{d}", .{ block_x, block_z }) + PADDING * 2;
 
-    x_offset += TextRenderer.textWidth(fmtBuf("{d},{d}", .{ chunk_x, chunk_z }), SMALL_TEXT_SCALE) + PADDING;
-    tr.drawFmt(x_offset, text_y, SMALL_TEXT_SCALE, DIM_TEXT_COLOR, "Region: ", .{});
-    x_offset += TextRenderer.textWidth("Region: ", SMALL_TEXT_SCALE);
-    tr.drawFmt(x_offset, text_y, SMALL_TEXT_SCALE, TEXT_COLOR, "{d},{d}", .{ region_x, region_z });
+    tr.drawText("Chunk: ", x, text_y, SMALL_TEXT_SCALE, DIM_TEXT_COLOR);
+    x += tr.measureText("Chunk: ", SMALL_TEXT_SCALE);
+    tr.drawFmt(x, text_y, SMALL_TEXT_SCALE, TEXT_COLOR, "{d},{d}", .{ chunk_x, chunk_z });
+    x += tr.measureFmt(SMALL_TEXT_SCALE, "{d},{d}", .{ chunk_x, chunk_z }) + PADDING * 2;
 
-    // Right side: selection count
+    tr.drawText("Region: ", x, text_y, SMALL_TEXT_SCALE, DIM_TEXT_COLOR);
+    x += tr.measureText("Region: ", SMALL_TEXT_SCALE);
+    tr.drawFmt(x, text_y, SMALL_TEXT_SCALE, TEXT_COLOR, "{d},{d}", .{ region_x, region_z });
+
+    // Right: selection count
     const selected = selection.count();
     if (selected > 0) {
         var buf: [64]u8 = undefined;
         const sel_text = std.fmt.bufPrint(&buf, "Selected: {d}", .{selected}) catch return;
-        const sel_w = TextRenderer.textWidth(sel_text, SMALL_TEXT_SCALE);
+        const sel_w = tr.measureText(sel_text, SMALL_TEXT_SCALE);
         tr.drawText(sel_text, viewport_w - sel_w - PADDING, text_y, SMALL_TEXT_SCALE, ACCENT_COLOR);
     }
-}
-
-fn fmtBuf(comptime fmt: []const u8, args: anytype) []const u8 {
-    const S = struct {
-        var buf: [128]u8 = undefined;
-    };
-    return std.fmt.bufPrint(&S.buf, fmt, args) catch "";
 }
