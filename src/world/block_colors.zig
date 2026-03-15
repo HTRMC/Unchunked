@@ -35,8 +35,6 @@ pub fn heightToGreen(height: u8) Color {
 }
 
 pub fn lookup(name: []const u8) ?Color {
-    // Use a comptime-generated perfect hash or linear scan
-    // For now, linear scan over all known blocks
     for (&block_table) |entry| {
         if (std.mem.eql(u8, name, entry.name)) return entry.color;
     }
@@ -548,11 +546,13 @@ const block_table = [_]BlockEntry{
     .{ .name = "minecraft:lapis_block", .color = .{ .r = 30, .g = 67, .b = 140 } },
     .{ .name = "minecraft:lapis_ore", .color = .{ .r = 107, .g = 117, .b = 141 } },
     .{ .name = "minecraft:large_amethyst_bud", .color = .{ .r = 161, .g = 126, .b = 202 } },
+    .{ .name = "minecraft:large_fern", .color = .{ .r = 125, .g = 125, .b = 125 } },
     .{ .name = "minecraft:lava", .color = .{ .r = 212, .g = 90, .b = 18 } },
     .{ .name = "minecraft:lava_cauldron", .color = .{ .r = 73, .g = 72, .b = 74 } },
     .{ .name = "minecraft:leaf_litter", .color = .{ .r = 170, .g = 170, .b = 170 } },
     .{ .name = "minecraft:lectern", .color = .{ .r = 173, .g = 137, .b = 83 } },
     .{ .name = "minecraft:lever", .color = .{ .r = 127, .g = 127, .b = 127 } },
+    .{ .name = "minecraft:light", .color = .{ .r = 136, .g = 145, .b = 133 } },
     .{ .name = "minecraft:light_blue_banner", .color = .{ .r = 162, .g = 130, .b = 78 } },
     .{ .name = "minecraft:light_blue_bed", .color = .{ .r = 162, .g = 130, .b = 78 } },
     .{ .name = "minecraft:light_blue_candle", .color = .{ .r = 34, .g = 137, .b = 196 } },
@@ -1037,6 +1037,7 @@ const block_table = [_]BlockEntry{
     .{ .name = "minecraft:suspicious_sand", .color = .{ .r = 216, .g = 202, .b = 156 } },
     .{ .name = "minecraft:sweet_berry_bush", .color = .{ .r = 47, .g = 94, .b = 57 } },
     .{ .name = "minecraft:tall_dry_grass", .color = .{ .r = 196, .g = 171, .b = 122 } },
+    .{ .name = "minecraft:tall_grass", .color = .{ .r = 151, .g = 149, .b = 151 } },
     .{ .name = "minecraft:tall_seagrass", .color = .{ .r = 59, .g = 139, .b = 14 } },
     .{ .name = "minecraft:target", .color = .{ .r = 226, .g = 170, .b = 157 } },
     .{ .name = "minecraft:terracotta", .color = .{ .r = 152, .g = 94, .b = 67 } },
