@@ -57,6 +57,53 @@ pub const VkDebugUtilsMessageSeverityFlagBitsEXT = c.VkDebugUtilsMessageSeverity
 pub const VkDebugUtilsMessageTypeFlagsEXT = c.VkDebugUtilsMessageTypeFlagsEXT;
 pub const VkDebugUtilsMessengerCallbackDataEXT = c.VkDebugUtilsMessengerCallbackDataEXT;
 
+// Buffer/memory types
+pub const VkBuffer = c.VkBuffer;
+pub const VkDeviceMemory = c.VkDeviceMemory;
+pub const VkDeviceSize = c.VkDeviceSize;
+pub const VkBufferCreateInfo = c.VkBufferCreateInfo;
+pub const VkMemoryAllocateInfo = c.VkMemoryAllocateInfo;
+pub const VkMemoryRequirements = c.VkMemoryRequirements;
+pub const VkPhysicalDeviceMemoryProperties = c.VkPhysicalDeviceMemoryProperties;
+
+// Pipeline types
+pub const VkShaderModule = c.VkShaderModule;
+pub const VkPipeline = c.VkPipeline;
+pub const VkPipelineLayout = c.VkPipelineLayout;
+pub const VkShaderModuleCreateInfo = c.VkShaderModuleCreateInfo;
+pub const VkPipelineShaderStageCreateInfo = c.VkPipelineShaderStageCreateInfo;
+pub const VkPipelineVertexInputStateCreateInfo = c.VkPipelineVertexInputStateCreateInfo;
+pub const VkPipelineInputAssemblyStateCreateInfo = c.VkPipelineInputAssemblyStateCreateInfo;
+pub const VkPipelineViewportStateCreateInfo = c.VkPipelineViewportStateCreateInfo;
+pub const VkPipelineRasterizationStateCreateInfo = c.VkPipelineRasterizationStateCreateInfo;
+pub const VkPipelineMultisampleStateCreateInfo = c.VkPipelineMultisampleStateCreateInfo;
+pub const VkPipelineColorBlendAttachmentState = c.VkPipelineColorBlendAttachmentState;
+pub const VkPipelineColorBlendStateCreateInfo = c.VkPipelineColorBlendStateCreateInfo;
+pub const VkPipelineDepthStencilStateCreateInfo = c.VkPipelineDepthStencilStateCreateInfo;
+pub const VkPipelineLayoutCreateInfo = c.VkPipelineLayoutCreateInfo;
+pub const VkPushConstantRange = c.VkPushConstantRange;
+pub const VkGraphicsPipelineCreateInfo = c.VkGraphicsPipelineCreateInfo;
+pub const VkPipelineDynamicStateCreateInfo = c.VkPipelineDynamicStateCreateInfo;
+pub const VkDynamicState = c.VkDynamicState;
+pub const VkViewport = c.VkViewport;
+
+// Descriptor types
+pub const VkDescriptorSetLayout = c.VkDescriptorSetLayout;
+pub const VkDescriptorPool = c.VkDescriptorPool;
+pub const VkDescriptorSet = c.VkDescriptorSet;
+pub const VkDescriptorSetLayoutBinding = c.VkDescriptorSetLayoutBinding;
+pub const VkDescriptorSetLayoutCreateInfo = c.VkDescriptorSetLayoutCreateInfo;
+pub const VkDescriptorPoolSize = c.VkDescriptorPoolSize;
+pub const VkDescriptorPoolCreateInfo = c.VkDescriptorPoolCreateInfo;
+pub const VkDescriptorSetAllocateInfo = c.VkDescriptorSetAllocateInfo;
+pub const VkWriteDescriptorSet = c.VkWriteDescriptorSet;
+pub const VkDescriptorBufferInfo = c.VkDescriptorBufferInfo;
+
+// Dynamic rendering types
+pub const VkRenderingInfo = c.VkRenderingInfo;
+pub const VkRenderingAttachmentInfo = c.VkRenderingAttachmentInfo;
+pub const VkPipelineRenderingCreateInfo = c.VkPipelineRenderingCreateInfo;
+
 // Constants
 pub const VK_SUCCESS = c.VK_SUCCESS;
 pub const VK_TRUE = c.VK_TRUE;
@@ -105,7 +152,9 @@ pub const VK_PIPELINE_STAGE_TRANSFER_BIT = c.VK_PIPELINE_STAGE_TRANSFER_BIT;
 pub const VK_IMAGE_LAYOUT_UNDEFINED = c.VK_IMAGE_LAYOUT_UNDEFINED;
 pub const VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL = c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 pub const VK_IMAGE_LAYOUT_PRESENT_SRC_KHR = c.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+pub const VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 pub const VK_ACCESS_TRANSFER_WRITE_BIT = c.VK_ACCESS_TRANSFER_WRITE_BIT;
+pub const VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT = c.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
 pub const VK_FORMAT_B8G8R8A8_SRGB = c.VK_FORMAT_B8G8R8A8_SRGB;
 pub const VK_FORMAT_B8G8R8A8_UNORM = c.VK_FORMAT_B8G8R8A8_UNORM;
@@ -122,6 +171,65 @@ pub const VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT = c.VK_DEBUG_UTILS_MES
 
 pub const VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU = c.VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
 pub const VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU = c.VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+
+// Buffer/memory constants
+pub const VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+pub const VK_BUFFER_USAGE_STORAGE_BUFFER_BIT = c.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+pub const VK_BUFFER_USAGE_VERTEX_BUFFER_BIT = c.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+pub const VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT = c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+pub const VK_MEMORY_PROPERTY_HOST_COHERENT_BIT = c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+pub const VK_WHOLE_SIZE = c.VK_WHOLE_SIZE;
+
+// Pipeline constants
+pub const VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO = c.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO = c.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO = c.VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO = c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+pub const VK_SHADER_STAGE_VERTEX_BIT = c.VK_SHADER_STAGE_VERTEX_BIT;
+pub const VK_SHADER_STAGE_FRAGMENT_BIT = c.VK_SHADER_STAGE_FRAGMENT_BIT;
+pub const VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+pub const VK_POLYGON_MODE_FILL = c.VK_POLYGON_MODE_FILL;
+pub const VK_CULL_MODE_NONE = c.VK_CULL_MODE_NONE;
+pub const VK_FRONT_FACE_COUNTER_CLOCKWISE = c.VK_FRONT_FACE_COUNTER_CLOCKWISE;
+pub const VK_BLEND_FACTOR_ONE = c.VK_BLEND_FACTOR_ONE;
+pub const VK_BLEND_FACTOR_ZERO = c.VK_BLEND_FACTOR_ZERO;
+pub const VK_BLEND_FACTOR_SRC_ALPHA = c.VK_BLEND_FACTOR_SRC_ALPHA;
+pub const VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA = c.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+pub const VK_BLEND_OP_ADD = c.VK_BLEND_OP_ADD;
+pub const VK_COLOR_COMPONENT_R_BIT = c.VK_COLOR_COMPONENT_R_BIT;
+pub const VK_COLOR_COMPONENT_G_BIT = c.VK_COLOR_COMPONENT_G_BIT;
+pub const VK_COLOR_COMPONENT_B_BIT = c.VK_COLOR_COMPONENT_B_BIT;
+pub const VK_COLOR_COMPONENT_A_BIT = c.VK_COLOR_COMPONENT_A_BIT;
+pub const VK_DYNAMIC_STATE_VIEWPORT = c.VK_DYNAMIC_STATE_VIEWPORT;
+pub const VK_DYNAMIC_STATE_SCISSOR = c.VK_DYNAMIC_STATE_SCISSOR;
+pub const VK_PIPELINE_BIND_POINT_GRAPHICS = c.VK_PIPELINE_BIND_POINT_GRAPHICS;
+
+// Descriptor constants
+pub const VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO = c.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+pub const VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+pub const VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+pub const VK_DESCRIPTOR_TYPE_STORAGE_BUFFER = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+
+// Dynamic rendering constants
+pub const VK_STRUCTURE_TYPE_RENDERING_INFO = c.VK_STRUCTURE_TYPE_RENDERING_INFO;
+pub const VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO = c.VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+pub const VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO = c.VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+pub const VK_ATTACHMENT_LOAD_OP_CLEAR = c.VK_ATTACHMENT_LOAD_OP_CLEAR;
+pub const VK_ATTACHMENT_LOAD_OP_LOAD = c.VK_ATTACHMENT_LOAD_OP_LOAD;
+pub const VK_ATTACHMENT_STORE_OP_STORE = c.VK_ATTACHMENT_STORE_OP_STORE;
+
+// Vulkan 1.3 features
+pub const VkPhysicalDeviceVulkan13Features = c.VkPhysicalDeviceVulkan13Features;
+pub const VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES = c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
 
 // Error handling
 pub const VulkanError = error{
@@ -262,6 +370,15 @@ pub fn getPhysicalDeviceSurfaceSupportKHR(
     const fn_ptr = c.vkGetPhysicalDeviceSurfaceSupportKHR orelse return error.FunctionNotLoaded;
     const result = fn_ptr(physical_device, queue_family_index, surface, supported);
     try vkResultToError(result);
+}
+
+pub fn getPhysicalDeviceMemoryProperties(
+    physical_device: VkPhysicalDevice,
+    memory_properties: *VkPhysicalDeviceMemoryProperties,
+) void {
+    if (c.vkGetPhysicalDeviceMemoryProperties) |fn_ptr| {
+        fn_ptr(physical_device, memory_properties);
+    }
 }
 
 // Device
@@ -592,6 +709,312 @@ pub fn cmdClearColorImage(
 ) void {
     if (c.vkCmdClearColorImage) |fn_ptr| {
         fn_ptr(command_buffer, image, image_layout, color, range_count, ranges);
+    }
+}
+
+// Buffer operations
+pub fn createBuffer(
+    device: VkDevice,
+    create_info: *const VkBufferCreateInfo,
+    allocator: ?*const VkAllocationCallbacks,
+) VulkanError!VkBuffer {
+    const fn_ptr = c.vkCreateBuffer orelse return error.FunctionNotLoaded;
+    var buffer: VkBuffer = undefined;
+    const result = fn_ptr(device, create_info, allocator, &buffer);
+    try vkResultToError(result);
+    return buffer;
+}
+
+pub fn destroyBuffer(
+    device: VkDevice,
+    buffer: VkBuffer,
+    allocator: ?*const VkAllocationCallbacks,
+) void {
+    if (c.vkDestroyBuffer) |fn_ptr| {
+        fn_ptr(device, buffer, allocator);
+    }
+}
+
+pub fn getBufferMemoryRequirements(
+    device: VkDevice,
+    buffer: VkBuffer,
+    memory_requirements: *VkMemoryRequirements,
+) void {
+    if (c.vkGetBufferMemoryRequirements) |fn_ptr| {
+        fn_ptr(device, buffer, memory_requirements);
+    }
+}
+
+pub fn allocateMemory(
+    device: VkDevice,
+    allocate_info: *const VkMemoryAllocateInfo,
+    allocator: ?*const VkAllocationCallbacks,
+) VulkanError!VkDeviceMemory {
+    const fn_ptr = c.vkAllocateMemory orelse return error.FunctionNotLoaded;
+    var memory: VkDeviceMemory = undefined;
+    const result = fn_ptr(device, allocate_info, allocator, &memory);
+    try vkResultToError(result);
+    return memory;
+}
+
+pub fn freeMemory(
+    device: VkDevice,
+    memory: VkDeviceMemory,
+    allocator: ?*const VkAllocationCallbacks,
+) void {
+    if (c.vkFreeMemory) |fn_ptr| {
+        fn_ptr(device, memory, allocator);
+    }
+}
+
+pub fn bindBufferMemory(
+    device: VkDevice,
+    buffer: VkBuffer,
+    memory: VkDeviceMemory,
+    memory_offset: VkDeviceSize,
+) VulkanError!void {
+    const fn_ptr = c.vkBindBufferMemory orelse return error.FunctionNotLoaded;
+    const result = fn_ptr(device, buffer, memory, memory_offset);
+    try vkResultToError(result);
+}
+
+pub fn mapMemory(
+    device: VkDevice,
+    memory: VkDeviceMemory,
+    offset: VkDeviceSize,
+    size: VkDeviceSize,
+    flags: c.VkMemoryMapFlags,
+    data: *?*anyopaque,
+) VulkanError!void {
+    const fn_ptr = c.vkMapMemory orelse return error.FunctionNotLoaded;
+    const result = fn_ptr(device, memory, offset, size, flags, data);
+    try vkResultToError(result);
+}
+
+// Shader module
+pub fn createShaderModule(
+    device: VkDevice,
+    create_info: *const VkShaderModuleCreateInfo,
+    allocator: ?*const VkAllocationCallbacks,
+) VulkanError!VkShaderModule {
+    const fn_ptr = c.vkCreateShaderModule orelse return error.FunctionNotLoaded;
+    var shader_module: VkShaderModule = undefined;
+    const result = fn_ptr(device, create_info, allocator, &shader_module);
+    try vkResultToError(result);
+    return shader_module;
+}
+
+pub fn destroyShaderModule(
+    device: VkDevice,
+    shader_module: VkShaderModule,
+    allocator: ?*const VkAllocationCallbacks,
+) void {
+    if (c.vkDestroyShaderModule) |fn_ptr| {
+        fn_ptr(device, shader_module, allocator);
+    }
+}
+
+// Pipeline
+pub fn createPipelineLayout(
+    device: VkDevice,
+    create_info: *const VkPipelineLayoutCreateInfo,
+    allocator: ?*const VkAllocationCallbacks,
+) VulkanError!VkPipelineLayout {
+    const fn_ptr = c.vkCreatePipelineLayout orelse return error.FunctionNotLoaded;
+    var pipeline_layout: VkPipelineLayout = undefined;
+    const result = fn_ptr(device, create_info, allocator, &pipeline_layout);
+    try vkResultToError(result);
+    return pipeline_layout;
+}
+
+pub fn destroyPipelineLayout(
+    device: VkDevice,
+    pipeline_layout: VkPipelineLayout,
+    allocator: ?*const VkAllocationCallbacks,
+) void {
+    if (c.vkDestroyPipelineLayout) |fn_ptr| {
+        fn_ptr(device, pipeline_layout, allocator);
+    }
+}
+
+pub fn createGraphicsPipelines(
+    device: VkDevice,
+    pipeline_cache: c.VkPipelineCache,
+    create_info_count: u32,
+    create_infos: [*]const VkGraphicsPipelineCreateInfo,
+    allocator: ?*const VkAllocationCallbacks,
+    pipelines: [*]VkPipeline,
+) VulkanError!void {
+    const fn_ptr = c.vkCreateGraphicsPipelines orelse return error.FunctionNotLoaded;
+    const result = fn_ptr(device, pipeline_cache, create_info_count, create_infos, allocator, pipelines);
+    try vkResultToError(result);
+}
+
+pub fn destroyPipeline(
+    device: VkDevice,
+    pipeline: VkPipeline,
+    allocator: ?*const VkAllocationCallbacks,
+) void {
+    if (c.vkDestroyPipeline) |fn_ptr| {
+        fn_ptr(device, pipeline, allocator);
+    }
+}
+
+// Descriptor operations
+pub fn createDescriptorSetLayout(
+    device: VkDevice,
+    create_info: *const VkDescriptorSetLayoutCreateInfo,
+    allocator: ?*const VkAllocationCallbacks,
+) VulkanError!VkDescriptorSetLayout {
+    const fn_ptr = c.vkCreateDescriptorSetLayout orelse return error.FunctionNotLoaded;
+    var descriptor_set_layout: VkDescriptorSetLayout = undefined;
+    const result = fn_ptr(device, create_info, allocator, &descriptor_set_layout);
+    try vkResultToError(result);
+    return descriptor_set_layout;
+}
+
+pub fn destroyDescriptorSetLayout(
+    device: VkDevice,
+    descriptor_set_layout: VkDescriptorSetLayout,
+    allocator: ?*const VkAllocationCallbacks,
+) void {
+    if (c.vkDestroyDescriptorSetLayout) |fn_ptr| {
+        fn_ptr(device, descriptor_set_layout, allocator);
+    }
+}
+
+pub fn createDescriptorPool(
+    device: VkDevice,
+    create_info: *const VkDescriptorPoolCreateInfo,
+    allocator: ?*const VkAllocationCallbacks,
+) VulkanError!VkDescriptorPool {
+    const fn_ptr = c.vkCreateDescriptorPool orelse return error.FunctionNotLoaded;
+    var descriptor_pool: VkDescriptorPool = undefined;
+    const result = fn_ptr(device, create_info, allocator, &descriptor_pool);
+    try vkResultToError(result);
+    return descriptor_pool;
+}
+
+pub fn destroyDescriptorPool(
+    device: VkDevice,
+    descriptor_pool: VkDescriptorPool,
+    allocator: ?*const VkAllocationCallbacks,
+) void {
+    if (c.vkDestroyDescriptorPool) |fn_ptr| {
+        fn_ptr(device, descriptor_pool, allocator);
+    }
+}
+
+pub fn allocateDescriptorSets(
+    device: VkDevice,
+    allocate_info: *const VkDescriptorSetAllocateInfo,
+    descriptor_sets: [*]VkDescriptorSet,
+) VulkanError!void {
+    const fn_ptr = c.vkAllocateDescriptorSets orelse return error.FunctionNotLoaded;
+    const result = fn_ptr(device, allocate_info, descriptor_sets);
+    try vkResultToError(result);
+}
+
+pub fn updateDescriptorSets(
+    device: VkDevice,
+    descriptor_write_count: u32,
+    descriptor_writes: [*]const VkWriteDescriptorSet,
+    descriptor_copy_count: u32,
+    descriptor_copies: ?[*]const c.VkCopyDescriptorSet,
+) void {
+    if (c.vkUpdateDescriptorSets) |fn_ptr| {
+        fn_ptr(device, descriptor_write_count, descriptor_writes, descriptor_copy_count, descriptor_copies);
+    }
+}
+
+// Draw commands
+pub fn cmdBindPipeline(
+    command_buffer: VkCommandBuffer,
+    pipeline_bind_point: c.VkPipelineBindPoint,
+    pipeline: VkPipeline,
+) void {
+    if (c.vkCmdBindPipeline) |fn_ptr| {
+        fn_ptr(command_buffer, pipeline_bind_point, pipeline);
+    }
+}
+
+pub fn cmdBindDescriptorSets(
+    command_buffer: VkCommandBuffer,
+    pipeline_bind_point: c.VkPipelineBindPoint,
+    layout: VkPipelineLayout,
+    first_set: u32,
+    descriptor_set_count: u32,
+    descriptor_sets: [*]const VkDescriptorSet,
+    dynamic_offset_count: u32,
+    dynamic_offsets: ?[*]const u32,
+) void {
+    if (c.vkCmdBindDescriptorSets) |fn_ptr| {
+        fn_ptr(command_buffer, pipeline_bind_point, layout, first_set, descriptor_set_count, descriptor_sets, dynamic_offset_count, dynamic_offsets);
+    }
+}
+
+pub fn cmdPushConstants(
+    command_buffer: VkCommandBuffer,
+    layout: VkPipelineLayout,
+    stage_flags: c.VkShaderStageFlags,
+    offset: u32,
+    size: u32,
+    values: *const anyopaque,
+) void {
+    if (c.vkCmdPushConstants) |fn_ptr| {
+        fn_ptr(command_buffer, layout, stage_flags, offset, size, values);
+    }
+}
+
+pub fn cmdDraw(
+    command_buffer: VkCommandBuffer,
+    vertex_count: u32,
+    instance_count: u32,
+    first_vertex: u32,
+    first_instance: u32,
+) void {
+    if (c.vkCmdDraw) |fn_ptr| {
+        fn_ptr(command_buffer, vertex_count, instance_count, first_vertex, first_instance);
+    }
+}
+
+pub fn cmdSetViewport(
+    command_buffer: VkCommandBuffer,
+    first_viewport: u32,
+    viewport_count: u32,
+    viewports: [*]const VkViewport,
+) void {
+    if (c.vkCmdSetViewport) |fn_ptr| {
+        fn_ptr(command_buffer, first_viewport, viewport_count, viewports);
+    }
+}
+
+pub fn cmdSetScissor(
+    command_buffer: VkCommandBuffer,
+    first_scissor: u32,
+    scissor_count: u32,
+    scissors: [*]const VkRect2D,
+) void {
+    if (c.vkCmdSetScissor) |fn_ptr| {
+        fn_ptr(command_buffer, first_scissor, scissor_count, scissors);
+    }
+}
+
+// Dynamic rendering
+pub fn cmdBeginRendering(
+    command_buffer: VkCommandBuffer,
+    rendering_info: *const VkRenderingInfo,
+) void {
+    if (c.vkCmdBeginRendering) |fn_ptr| {
+        fn_ptr(command_buffer, rendering_info);
+    }
+}
+
+pub fn cmdEndRendering(
+    command_buffer: VkCommandBuffer,
+) void {
+    if (c.vkCmdEndRendering) |fn_ptr| {
+        fn_ptr(command_buffer);
     }
 }
 
