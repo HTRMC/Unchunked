@@ -283,7 +283,9 @@ fn renderTileMap(self: *App) void {
     // Load all unloaded regions in background, collect newly completed ones
     var new_keys: std.ArrayListUnmanaged(World.RegionKey) = .empty;
     defer new_keys.deinit(self.allocator);
-    world.loadRegions(&new_keys);
+    const center_rx: i32 = @intFromFloat(@floor(self.camera.center_x / 32.0));
+    const center_rz: i32 = @intFromFloat(@floor(self.camera.center_z / 32.0));
+    world.loadRegions(center_rx, center_rz, &new_keys);
 
     // Upload newly loaded regions to the tile atlas
     for (new_keys.items) |key| {

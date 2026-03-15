@@ -136,10 +136,12 @@ fn bgWorker(job: *BgJob) void {
     job.done.store(true, .release);
 }
 
-/// Called each frame: spawns background loaders for unloaded regions,
-/// and collects completed ones into new_keys for atlas upload.
+/// Called each frame: spawns background loaders for unloaded regions
+/// prioritized by distance from camera center (closest first).
 pub fn loadRegions(
     self: *World,
+    center_rx: i32,
+    center_rz: i32,
     new_keys: *std.ArrayListUnmanaged(RegionKey),
 ) void {
     // Collect completed background jobs
@@ -164,17 +166,43 @@ pub fn loadRegions(
         if (slot != null) active += 1;
     }
 
-    // Spawn new jobs for all unloaded regions
-    const region_path = self.region_dir_path orelse return;
+    if (active >= MAX_BG_JOBS) return;
+
+    // Collect unloaded regions and sort by distance from camera center
+    const max_pending = 256;
+    var pending: [max_pending]RegionKey = undefined;
+    var pending_count: u32 = 0;
 
     var region_it = self.regions.iterator();
     while (region_it.next()) |entry| {
+        if (pending_count >= max_pending) break;
+        const region = entry.value_ptr;
+        if (region.pixels != null or region.loading) continue;
+        pending[pending_count] = entry.key_ptr.*;
+        pending_count += 1;
+    }
+
+    if (pending_count == 0) return;
+
+    // Sort by distance from camera center (closest first)
+    const SortCtx = struct {
+        cx: i32,
+        cz: i32,
+        pub fn lessThan(ctx: @This(), a: RegionKey, b: RegionKey) bool {
+            const da = (a.x - ctx.cx) * (a.x - ctx.cx) + (a.z - ctx.cz) * (a.z - ctx.cz);
+            const db = (b.x - ctx.cx) * (b.x - ctx.cx) + (b.z - ctx.cz) * (b.z - ctx.cz);
+            return da < db;
+        }
+    };
+    std.mem.sortUnstable(RegionKey, pending[0..pending_count], SortCtx{ .cx = center_rx, .cz = center_rz }, SortCtx.lessThan);
+
+    // Spawn jobs for closest unloaded regions
+    const region_path = self.region_dir_path orelse return;
+
+    for (pending[0..pending_count]) |rk| {
         if (active >= MAX_BG_JOBS) return;
 
-        const rk = entry.key_ptr.*;
-        const region = entry.value_ptr;
-        if (region.pixels != null) continue;
-        if (region.loading) continue;
+        const region = self.regions.getPtr(rk) orelse continue;
 
         const mca_path = std.fmt.allocPrint(self.allocator, "{s}{c}r.{d}.{d}.mca", .{
             region_path, std.fs.path.sep, rk.x, rk.z,
