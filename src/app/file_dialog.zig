@@ -13,19 +13,38 @@ fn openFolderWindows(allocator: std.mem.Allocator, io: std.Io, environ_map: *std
     const default_path = getDefaultSavesPathWindows(allocator, environ_map);
     defer if (default_path.len > 0) allocator.free(default_path);
 
-    const script = try std.fmt.allocPrint(allocator,
-        \\Add-Type -AssemblyName System.Windows.Forms
-        \\$dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-        \\$dlg.Description = 'Select Minecraft World Folder'
-        \\$dlg.ShowNewFolderButton = $false
-        \\if ('{s}' -ne '') {{ $dlg.SelectedPath = '{s}' }}
-        \\if ($dlg.ShowDialog() -eq 'OK') {{ Write-Host $dlg.SelectedPath }}
-    , .{ default_path, default_path });
+    const script = if (default_path.len > 0)
+        try std.fmt.allocPrint(allocator,
+            \\[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
+            \\$ofd = New-Object System.Windows.Forms.OpenFileDialog
+            \\$ofd.Title = 'Select Minecraft World Folder'
+            \\$ofd.InitialDirectory = '{s}'
+            \\$ofd.ValidateNames = $false
+            \\$ofd.CheckFileExists = $false
+            \\$ofd.CheckPathExists = $true
+            \\$ofd.FileName = 'Select Folder'
+            \\if ($ofd.ShowDialog() -eq 'OK') {{
+            \\  Write-Host ([System.IO.Path]::GetDirectoryName($ofd.FileName))
+            \\}}
+        , .{default_path})
+    else
+        try allocator.dupe(u8,
+            \\[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
+            \\$ofd = New-Object System.Windows.Forms.OpenFileDialog
+            \\$ofd.Title = 'Select Minecraft World Folder'
+            \\$ofd.ValidateNames = $false
+            \\$ofd.CheckFileExists = $false
+            \\$ofd.CheckPathExists = $true
+            \\$ofd.FileName = 'Select Folder'
+            \\if ($ofd.ShowDialog() -eq 'OK') {
+            \\  Write-Host ([System.IO.Path]::GetDirectoryName($ofd.FileName))
+            \\}
+        );
     defer allocator.free(script);
 
     const result = try std.process.run(allocator, io, .{
-        .argv = &.{ "powershell", "-NoProfile", "-Command", script },
-        .create_no_window = true,
+        .argv = &.{ "powershell", "-NoProfile", "-STA", "-Command", script },
+        .create_no_window = false,
     });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
