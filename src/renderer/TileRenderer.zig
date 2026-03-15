@@ -122,14 +122,15 @@ pub fn deinit(self: *TileRenderer) void {
 
 /// Stage a region for upload. Copies pixels to staging buffer and creates VkImage.
 /// The actual GPU copy happens in recordUploads().
-pub fn uploadRegion(self: *TileRenderer, rx: i32, rz: i32, pixels: []const u8) bool {
+pub fn uploadRegion(self: *TileRenderer, rx: i32, rz: i32, pixels: []const u8, frame_index: u32) bool {
     const key = RegionKey{ .rx = rx, .rz = rz };
     if (self.region_textures.contains(key)) return true;
     if (self.next_texture_index >= MAX_TEXTURES) return false;
     if (self.pending_count >= MAX_UPLOADS_PER_FRAME) return false;
 
-    // Copy pixels into staging buffer at offset
-    const staging_offset = @as(u64, self.pending_count) * Region.PIXEL_DATA_SIZE;
+    // Copy pixels into this frame's staging region (double-buffered to avoid GPU race)
+    const frame_base = @as(u64, frame_index) * MAX_UPLOADS_PER_FRAME * Region.PIXEL_DATA_SIZE;
+    const staging_offset = frame_base + @as(u64, self.pending_count) * Region.PIXEL_DATA_SIZE;
     const dst: [*]u8 = @ptrCast(self.staging_mapped orelse return false);
     @memcpy(dst[staging_offset..][0..Region.PIXEL_DATA_SIZE], pixels[0..Region.PIXEL_DATA_SIZE]);
 
@@ -311,8 +312,8 @@ fn createSampler(self: *TileRenderer) !void {
 }
 
 fn createStagingBuffer(self: *TileRenderer) !void {
-    // Staging buffer large enough for MAX_UPLOADS_PER_FRAME regions
-    const staging_size = Region.PIXEL_DATA_SIZE * MAX_UPLOADS_PER_FRAME;
+    // Double-buffered: each frame slot gets its own staging region
+    const staging_size = Region.PIXEL_DATA_SIZE * MAX_UPLOADS_PER_FRAME * Renderer.MAX_FRAMES_IN_FLIGHT;
     self.staging_buffer = try vk.createBuffer(self.device, &.{
         .sType = vk.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .pNext = null, .flags = 0,
         .size = staging_size, .usage = vk.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,

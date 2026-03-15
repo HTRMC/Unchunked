@@ -47,12 +47,12 @@ pub const ThreadPool = struct {
 
     pub fn deinit(self: *ThreadPool) void {
         self.shutdown.store(true, .release);
-        for (self.threads) |t| t.detach();
+        for (self.threads) |t| t.join();
         self.allocator.free(self.threads);
         self.allocator.free(self.slots);
     }
 
-    pub fn submitPtr(self: *ThreadPool, comptime func: anytype, ptr: anytype) void {
+    pub fn submitPtr(self: *ThreadPool, comptime func: anytype, ptr: anytype) bool {
         const PtrType = @TypeOf(ptr);
         const Wrapper = struct {
             fn call(raw: *anyopaque) void {
@@ -61,10 +61,10 @@ pub const ThreadPool = struct {
             }
         };
 
-        self.enqueue(.{ .func = Wrapper.call, .data = @ptrCast(@alignCast(ptr)) });
+        return self.enqueue(.{ .func = Wrapper.call, .data = @ptrCast(@alignCast(ptr)) });
     }
 
-    fn enqueue(self: *ThreadPool, job: Job) void {
+    fn enqueue(self: *ThreadPool, job: Job) bool {
         var pos = self.enqueue_pos.load(.monotonic);
         while (true) {
             const slot = &self.slots[pos % QUEUE_SIZE];
@@ -79,10 +79,10 @@ pub const ThreadPool = struct {
                 }
                 slot.job = job;
                 slot.sequence.store(pos + 1, .release);
-                return;
+                return true;
             } else if (diff < 0) {
                 // Queue is full
-                return;
+                return false;
             } else {
                 // Another enqueuer beat us, reload
                 pos = self.enqueue_pos.load(.monotonic);

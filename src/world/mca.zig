@@ -76,13 +76,16 @@ pub fn deleteChunks(
 }
 
 pub fn readChunkNbt(allocator: std.mem.Allocator, io: Io, path: []const u8, header: *const RegionHeader, local_x: u5, local_z: u5) ?DecompressResult {
+    const file = Dir.openFile(.cwd(), io, path, .{}) catch return null;
+    defer file.close(io);
+    return readChunkNbtFromFile(allocator, io, file, header, local_x, local_z);
+}
+
+pub fn readChunkNbtFromFile(allocator: std.mem.Allocator, io: Io, file: File, header: *const RegionHeader, local_x: u5, local_z: u5) ?DecompressResult {
     const loc = header.locations[chunkIndex(local_x, local_z)];
     if (loc == 0) return null;
 
     const sector_offset: u64 = @as(u64, (loc >> 8) & 0xFFFFFF) * SECTOR_SIZE;
-
-    const file = Dir.openFile(.cwd(), io, path, .{}) catch return null;
-    defer file.close(io);
 
     // Read chunk header: 4-byte length + 1-byte compression type
     var chunk_header: [5]u8 = undefined;

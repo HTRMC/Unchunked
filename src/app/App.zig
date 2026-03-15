@@ -29,6 +29,7 @@ thread_pool: *World.ThreadPool,
 allocator: std.mem.Allocator,
 io: std.Io,
 environ_map: *std.process.Environ.Map,
+upload_queue: std.ArrayListUnmanaged(World.CompletedRegion) = .empty,
 state: State = .no_world,
 mouse_x: f64 = 0,
 mouse_y: f64 = 0,
@@ -83,15 +84,15 @@ pub fn setupCallbacks(self: *App) void {
 
 pub fn deinit(self: *App) void {
     vk.deviceWaitIdle(self.renderer.device) catch {};
-    if (self.world) |*w| w.deinit();
-    self.thread_pool.deinit();
+    self.thread_pool.deinit(); // stop workers first
     self.allocator.destroy(self.thread_pool);
+    if (self.world) |*w| w.deinit(); // then free world data
+    self.upload_queue.deinit(self.allocator);
     self.tile_renderer.deinit();
     self.text_renderer.deinit();
     self.quad_renderer.deinit();
     self.renderer.deinit();
     self.selection.deinit();
-    if (self.world) |*w| w.deinit();
 }
 
 pub fn openWorld(self: *App, path: []const u8) void {
@@ -108,6 +109,7 @@ pub fn openWorld(self: *App, path: []const u8) void {
 
     self.state = .viewing;
     self.selection.clear();
+    self.upload_queue.clearRetainingCapacity();
     self.camera.center_x = 0;
     self.camera.center_z = 0;
     self.tile_renderer.clearSlots();
@@ -129,6 +131,7 @@ pub fn switchDimension(self: *App, dim: World.Dimension) void {
     };
 
     self.selection.clear();
+    self.upload_queue.clearRetainingCapacity();
     self.tile_renderer.clearSlots();
 
     std.log.info("Switched to {s} ({} regions)", .{
@@ -138,13 +141,13 @@ pub fn switchDimension(self: *App, dim: World.Dimension) void {
 }
 
 pub fn update(self: *App) !void {
-    // Stage new regions for upload (CPU-side: copies to staging buffer, creates VkImages)
-    self.processRegionLoading();
-
     const frame_ctx = try self.renderer.beginFrame();
     const ctx = frame_ctx orelse return;
 
     const cmd = ctx.cmd;
+
+    // Stage new regions AFTER fence wait (beginFrame) so GPU is done with previous staging data
+    self.processRegionLoading(self.renderer.current_frame);
 
     // Update camera viewport on resize
     self.camera.setViewportSize(ctx.extent.width, ctx.extent.height);
@@ -313,34 +316,35 @@ fn resetPendingJobs(self: *App) void {
     }
 }
 
-fn processRegionLoading(self: *App) void {
+fn processRegionLoading(self: *App, frame_index: u32) void {
     const world = &(self.world orelse return);
 
-    var new_keys: std.ArrayListUnmanaged(World.RegionKey) = .empty;
-    defer new_keys.deinit(self.allocator);
     const center_rx: i32 = @intFromFloat(@floor(self.camera.center_x / 32.0));
     const center_rz: i32 = @intFromFloat(@floor(self.camera.center_z / 32.0));
-    world.loadRegions(center_rx, center_rz, &new_keys);
+    world.loadRegions(center_rx, center_rz, &self.upload_queue);
 
-    for (new_keys.items) |key| {
-        if (world.getRegion(key.x, key.z)) |region| {
-            if (region.pixels) |px| {
-                // Non-blocking: if GPU is busy with previous upload, try next frame
-                if (!self.tile_renderer.uploadRegion(key.x, key.z, px)) break;
-            }
+    // Upload completed regions using the exact key+pixels pairs from jobs.
+    // Process from the back so swapRemove doesn't skip entries.
+    var i: usize = self.upload_queue.items.len;
+    while (i > 0) {
+        i -= 1;
+        const entry = self.upload_queue.items[i];
+        if (self.tile_renderer.uploadRegion(entry.key.x, entry.key.z, entry.pixels, frame_index)) {
+            _ = self.upload_queue.swapRemove(i);
+        } else {
+            // Staging buffer full this frame, stop trying
+            return;
         }
     }
 }
 
 fn renderTileMap(self: *App) void {
-    const world = &(self.world orelse return);
+    if (self.world == null) return;
 
-    var region_it = world.regions.iterator();
-    while (region_it.next()) |entry| {
-        const region = entry.value_ptr;
-        if (region.pixels != null) {
-            self.tile_renderer.drawRegion(region.rx, region.rz);
-        }
+    // Iterate uploaded textures directly — keys came from job.key during upload
+    var tex_it = self.tile_renderer.region_textures.iterator();
+    while (tex_it.next()) |entry| {
+        self.tile_renderer.drawRegion(entry.key_ptr.rx, entry.key_ptr.rz);
     }
 }
 
