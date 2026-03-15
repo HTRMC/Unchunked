@@ -35,10 +35,13 @@ swapchain_image_views: [8]vk.VkImageView = .{null} ** 8,
 swapchain_image_count: u32 = 0,
 command_pool: vk.VkCommandPool = null,
 command_buffers: [MAX_FRAMES_IN_FLIGHT]vk.VkCommandBuffer = .{null} ** MAX_FRAMES_IN_FLIGHT,
-image_available_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.VkSemaphore = .{null} ** MAX_FRAMES_IN_FLIGHT,
-render_finished_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.VkSemaphore = .{null} ** MAX_FRAMES_IN_FLIGHT,
+// Per-swapchain-image semaphores to avoid reuse while presentation is pending
+image_available_semaphores: [8]vk.VkSemaphore = .{null} ** 8,
+render_finished_semaphores: [8]vk.VkSemaphore = .{null} ** 8,
 in_flight_fences: [MAX_FRAMES_IN_FLIGHT]vk.VkFence = .{null} ** MAX_FRAMES_IN_FLIGHT,
 current_frame: u32 = 0,
+// Tracks which fence each swapchain image is associated with (for waiting before reuse)
+image_in_flight: [8]?u32 = .{null} ** 8,
 framebuffer_resized: bool = false,
 window: *Window = undefined,
 
@@ -90,9 +93,11 @@ pub fn init(window: *Window) !Renderer {
 pub fn deinit(self: *Renderer) void {
     vk.deviceWaitIdle(self.device) catch {};
 
-    for (0..MAX_FRAMES_IN_FLIGHT) |i| {
+    for (0..self.swapchain_image_count) |i| {
         vk.destroySemaphore(self.device, self.image_available_semaphores[i], null);
         vk.destroySemaphore(self.device, self.render_finished_semaphores[i], null);
+    }
+    for (0..MAX_FRAMES_IN_FLIGHT) |i| {
         vk.destroyFence(self.device, self.in_flight_fences[i], null);
     }
 
@@ -128,6 +133,12 @@ pub fn beginFrame(self: *Renderer) !?FrameContext {
         }
         return err;
     };
+
+    // Wait for any previous frame that was using this swapchain image
+    if (self.image_in_flight[image_index]) |prev_frame| {
+        try vk.waitForFences(self.device, 1, @ptrCast(&self.in_flight_fences[prev_frame]), vk.VK_TRUE, std.math.maxInt(u64));
+    }
+    self.image_in_flight[image_index] = frame;
 
     try vk.resetFences(self.device, 1, @ptrCast(&self.in_flight_fences[frame]));
 
@@ -167,7 +178,7 @@ pub fn endFrame(self: *Renderer, ctx: FrameContext) !void {
         .commandBufferCount = 1,
         .pCommandBuffers = @ptrCast(&ctx.cmd),
         .signalSemaphoreCount = 1,
-        .pSignalSemaphores = @ptrCast(&self.render_finished_semaphores[frame]),
+        .pSignalSemaphores = @ptrCast(&self.render_finished_semaphores[ctx.image_index]),
     };
 
     try vk.queueSubmit(self.graphics_queue, 1, @ptrCast(&submit_info), self.in_flight_fences[frame]);
@@ -176,7 +187,7 @@ pub fn endFrame(self: *Renderer, ctx: FrameContext) !void {
         .sType = vk.VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .pNext = null,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = @ptrCast(&self.render_finished_semaphores[frame]),
+        .pWaitSemaphores = @ptrCast(&self.render_finished_semaphores[ctx.image_index]),
         .swapchainCount = 1,
         .pSwapchains = @ptrCast(&self.swapchain),
         .pImageIndices = @ptrCast(&ctx.image_index),
@@ -485,8 +496,34 @@ fn recreateSwapchain(self: *Renderer) !void {
     if (size.width == 0 or size.height == 0) return;
 
     try vk.deviceWaitIdle(self.device);
+
+    // Destroy old per-image semaphores
+    for (0..self.swapchain_image_count) |i| {
+        if (self.image_available_semaphores[i] != null) {
+            vk.destroySemaphore(self.device, self.image_available_semaphores[i], null);
+            self.image_available_semaphores[i] = null;
+        }
+        if (self.render_finished_semaphores[i] != null) {
+            vk.destroySemaphore(self.device, self.render_finished_semaphores[i], null);
+            self.render_finished_semaphores[i] = null;
+        }
+    }
+
     self.cleanupSwapchain();
     try self.createSwapchain(size.width, size.height);
+
+    // Recreate per-image semaphores for new swapchain
+    const sem_info: vk.VkSemaphoreCreateInfo = .{
+        .sType = vk.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = null,
+        .flags = 0,
+    };
+    for (0..self.swapchain_image_count) |i| {
+        self.image_available_semaphores[i] = try vk.createSemaphore(self.device, &sem_info, null);
+        self.render_finished_semaphores[i] = try vk.createSemaphore(self.device, &sem_info, null);
+    }
+
+    self.image_in_flight = .{null} ** 8;
 }
 
 fn createCommandResources(self: *Renderer) !void {
@@ -520,9 +557,12 @@ fn createSyncObjects(self: *Renderer) !void {
         .flags = vk.VK_FENCE_CREATE_SIGNALED_BIT,
     };
 
-    for (0..MAX_FRAMES_IN_FLIGHT) |i| {
+    // One semaphore pair per swapchain image to avoid reuse while presentation is pending
+    for (0..self.swapchain_image_count) |i| {
         self.image_available_semaphores[i] = try vk.createSemaphore(self.device, &sem_info, null);
         self.render_finished_semaphores[i] = try vk.createSemaphore(self.device, &sem_info, null);
+    }
+    for (0..MAX_FRAMES_IN_FLIGHT) |i| {
         self.in_flight_fences[i] = try vk.createFence(self.device, &fence_info, null);
     }
 }
