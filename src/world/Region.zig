@@ -39,24 +39,32 @@ pub fn loadFromHeader(rx: i32, rz: i32, header: *const mca.RegionHeader) Region 
 
 /// Render pixels into an externally-allocated buffer.
 /// Only reads self.chunks (immutable after scanRegions).
-pub fn renderPixels(pixels: []u8, allocator: std.mem.Allocator, io: std.Io, mca_path: []const u8, header: *const mca.RegionHeader, self: *const Region) void {
+pub fn renderPixels(pixels: []u8, allocator: std.mem.Allocator, io: std.Io, mca_path: []const u8, header: *const mca.RegionHeader, self: *Region) void {
+    // Populate chunk presence from header
+    for (0..32) |z| {
+        for (0..32) |x| {
+            self.chunks[z][x] = if (mca.chunkExists(header, @intCast(x), @intCast(z))) .present else .absent;
+        }
+    }
+
     @memset(pixels, 0);
 
     const file = std.Io.Dir.openFile(.cwd(), io, mca_path, .{}) catch return;
     defer file.close(io);
 
-    // Reusable 4MB decompression buffer — allocated once, shared across all chunks
+    // Reusable buffers — allocated once, shared across all chunks in this region
     const nbt_buf = allocator.alloc(u8, 4 * 1024 * 1024) catch return;
     defer allocator.free(nbt_buf);
+    const compressed_buf = allocator.alloc(u8, mca.MAX_COMPRESSED_SIZE) catch return;
+    defer allocator.free(compressed_buf);
 
     for (0..32) |z| {
         for (0..32) |x| {
-            if (self.chunks[z][x] != .present) continue;
-
             const lx: u5 = @intCast(x);
             const lz: u5 = @intCast(z);
+            if (!mca.chunkExists(header, lx, lz)) continue;
 
-            const result = mca.readChunkNbtFromFileReuse(allocator, io, file, header, lx, lz, nbt_buf) orelse continue;
+            const result = mca.readChunkNbtFromFileReuse(allocator, io, file, header, lx, lz, nbt_buf, compressed_buf) orelse continue;
 
             var chunk_pixels: chunk_renderer.ChunkPixels = undefined;
             chunk_renderer.renderChunk(result.data, &chunk_pixels);

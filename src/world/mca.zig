@@ -82,10 +82,12 @@ pub fn readChunkNbt(allocator: std.mem.Allocator, io: Io, path: []const u8, head
 }
 
 pub fn readChunkNbtFromFile(allocator: std.mem.Allocator, io: Io, file: File, header: *const RegionHeader, local_x: u5, local_z: u5) ?DecompressResult {
-    return readChunkNbtFromFileReuse(allocator, io, file, header, local_x, local_z, null);
+    return readChunkNbtFromFileReuse(allocator, io, file, header, local_x, local_z, null, null);
 }
 
-pub fn readChunkNbtFromFileReuse(allocator: std.mem.Allocator, io: Io, file: File, header: *const RegionHeader, local_x: u5, local_z: u5, reuse_buf: ?[]u8) ?DecompressResult {
+pub const MAX_COMPRESSED_SIZE = 1024 * 1024; // 1MB max compressed chunk
+
+pub fn readChunkNbtFromFileReuse(allocator: std.mem.Allocator, io: Io, file: File, header: *const RegionHeader, local_x: u5, local_z: u5, reuse_buf: ?[]u8, compressed_buf: ?[]u8) ?DecompressResult {
     const loc = header.locations[chunkIndex(local_x, local_z)];
     if (loc == 0) return null;
 
@@ -100,10 +102,11 @@ pub fn readChunkNbtFromFileReuse(allocator: std.mem.Allocator, io: Io, file: Fil
 
     if (data_length <= 1) return null;
 
-    // Read compressed data
+    // Read compressed data into reusable buffer or allocate
     const compressed_size: usize = data_length - 1;
-    const compressed = allocator.alloc(u8, compressed_size) catch return null;
-    defer allocator.free(compressed);
+    const need_alloc = compressed_buf == null or compressed_size > (compressed_buf orelse unreachable).len;
+    const compressed = if (!need_alloc) (compressed_buf.?)[0..compressed_size] else (allocator.alloc(u8, compressed_size) catch return null);
+    defer if (need_alloc) allocator.free(compressed);
 
     const read_count = file.readPositionalAll(io, compressed, sector_offset + 5) catch {
         return null;

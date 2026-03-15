@@ -123,12 +123,8 @@ pub fn scanRegions(self: *World) !void {
 
         const parsed = mca.parseRegionFilename(entry.name) orelse continue;
 
-        const mca_path = std.fmt.allocPrint(self.allocator, "{s}{c}{s}", .{ region_path, std.fs.path.sep, entry.name }) catch continue;
-        defer self.allocator.free(mca_path);
-
-        const header = mca.readRegionHeader(self.io, mca_path) catch continue;
-        const region = Region.loadFromHeader(parsed.x, parsed.z, &header);
         const key = RegionKey{ .x = parsed.x, .z = parsed.z };
+        const region = Region{ .rx = parsed.x, .rz = parsed.z };
         self.regions.put(key, region) catch continue;
     }
 

@@ -9,27 +9,27 @@ pub const TINT_WATER: u8 = 0x08;
 pub const TINT_STATIC: u8 = 0x20;
 pub const TINT_DRY_FOLIAGE: u8 = 0x80;
 
+const water_set = std.StaticStringMap(void).initComptime(.{
+    .{ "minecraft:water", {} }, .{ "water", {} },
+    .{ "minecraft:flowing_water", {} }, .{ "flowing_water", {} },
+    .{ "minecraft:bubble_column", {} }, .{ "bubble_column", {} },
+});
+
+const transparent_set = std.StaticStringMap(void).initComptime(.{
+    .{ "minecraft:air", {} }, .{ "air", {} },
+    .{ "minecraft:cave_air", {} }, .{ "cave_air", {} },
+    .{ "minecraft:void_air", {} }, .{ "void_air", {} },
+    .{ "minecraft:barrier", {} }, .{ "barrier", {} },
+    .{ "minecraft:light", {} }, .{ "light", {} },
+    .{ "minecraft:structure_void", {} }, .{ "structure_void", {} },
+});
+
 pub fn isWater(name: []const u8) bool {
-    const stripped = if (std.mem.startsWith(u8, name, "minecraft:"))
-        name["minecraft:".len..]
-    else
-        name;
-    return std.mem.eql(u8, stripped, "water") or
-        std.mem.eql(u8, stripped, "flowing_water") or
-        std.mem.eql(u8, stripped, "bubble_column");
+    return water_set.get(name) != null;
 }
 
 pub fn isTransparent(name: []const u8) bool {
-    const stripped = if (std.mem.startsWith(u8, name, "minecraft:"))
-        name["minecraft:".len..]
-    else
-        name;
-    return std.mem.eql(u8, stripped, "air") or
-        std.mem.eql(u8, stripped, "cave_air") or
-        std.mem.eql(u8, stripped, "void_air") or
-        std.mem.eql(u8, stripped, "barrier") or
-        std.mem.eql(u8, stripped, "light") or
-        std.mem.eql(u8, stripped, "structure_void");
+    return transparent_set.get(name) != null;
 }
 
 pub const BlockEntry = struct {
