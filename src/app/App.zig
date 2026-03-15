@@ -228,6 +228,7 @@ pub fn update(self: *App) !void {
     self.quad_renderer.resetFrame(self.renderer.current_frame);
 
     // Grid + selection overlays (world-space)
+    self.renderLoadingIndicators();
     self.renderGridOverlays();
     self.renderSelection();
     self.renderBoxSelection();
@@ -303,6 +304,32 @@ fn renderTileMap(self: *App) void {
         if (region.pixels != null) {
             self.tile_renderer.drawRegion(region.rx, region.rz);
         }
+    }
+}
+
+fn renderLoadingIndicators(self: *App) void {
+    const world = &(self.world orelse return);
+
+    const loading_bg = QuadRenderer.Color{ .r = 0.18, .g = 0.18, .b = 0.2, .a = 0.6 };
+    const loading_border = QuadRenderer.Color{ .r = 0.3, .g = 0.35, .b = 0.5, .a = 0.5 };
+    const border_w: f32 = @floatCast(1.0 / self.camera.scale);
+
+    var region_it = world.regions.iterator();
+    while (region_it.next()) |entry| {
+        const region = entry.value_ptr;
+        if (region.pixels != null) continue; // already loaded
+
+        const rx: f32 = @floatFromInt(@as(i32, region.rx) * 32);
+        const rz: f32 = @floatFromInt(@as(i32, region.rz) * 32);
+
+        // Dark background
+        self.quad_renderer.drawQuad(rx, rz, 32, 32, loading_bg);
+
+        // Border outline
+        self.quad_renderer.drawQuad(rx, rz, 32, border_w, loading_border); // top
+        self.quad_renderer.drawQuad(rx, rz + 32 - border_w, 32, border_w, loading_border); // bottom
+        self.quad_renderer.drawQuad(rx, rz, border_w, 32, loading_border); // left
+        self.quad_renderer.drawQuad(rx + 32 - border_w, rz, border_w, 32, loading_border); // right
     }
 }
 
