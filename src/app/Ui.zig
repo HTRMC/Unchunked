@@ -7,11 +7,11 @@ const World = @import("../world/World.zig");
 
 const Ui = @This();
 
-const TOOLBAR_HEIGHT: f32 = 32;
-const STATUSBAR_HEIGHT: f32 = 28;
+const TOOLBAR_HEIGHT: f32 = 36;
+const STATUSBAR_HEIGHT: f32 = 32;
 const PADDING: f32 = 10;
-const TEXT_SCALE: f32 = 1.0;
-const SMALL_TEXT_SCALE: f32 = 0.85;
+const TEXT_SCALE: f32 = 0.5;
+const SMALL_TEXT_SCALE: f32 = 0.42;
 
 const BG_COLOR = QuadRenderer.Color{ .r = 0.12, .g = 0.12, .b = 0.12, .a = 0.92 };
 const TEXT_COLOR = TextRenderer.Color{ .r = 0.9, .g = 0.9, .b = 0.9, .a = 1.0 };

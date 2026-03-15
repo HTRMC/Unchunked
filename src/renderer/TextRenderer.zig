@@ -10,7 +10,7 @@ const MAX_CHARS = 4096;
 const VERTICES_PER_CHAR = 6;
 const MAX_VERTICES = MAX_CHARS * VERTICES_PER_CHAR;
 
-const FONT_SIZE = 16;
+const FONT_SIZE = 32;
 const ATLAS_COLS = 16;
 const ATLAS_ROWS = 6; // covers ASCII 32-127 (96 chars)
 const FIRST_CHAR = 32;
@@ -129,10 +129,10 @@ pub fn drawText(self: *TextRenderer, text: []const u8, x: f32, y: f32, scale: f3
         const tex_u1 = (col * cw + m.width) / aw;
         const tex_v1 = (row * ch_f + m.height) / ah;
 
-        const gx = cursor_x + m.bearing_x * scale;
-        const gy = y + (self.font_ascender - m.bearing_y) * scale;
-        const gw = m.width * scale;
-        const gh = m.height * scale;
+        const gx = @round(cursor_x + m.bearing_x * scale);
+        const gy = @round(y + (self.font_ascender - m.bearing_y) * scale);
+        const gw = @ceil(m.width * scale);
+        const gh = @ceil(m.height * scale);
 
         const base: [*]TextVertex = @ptrCast(@alignCast(self.mapped_data orelse return));
         const verts = base[self.vertex_count..][0..6];
@@ -225,6 +225,10 @@ fn createFontTexture(self: *TextRenderer, renderer: *Renderer) !void {
     self.atlas_height = self.cell_height * ATLAS_ROWS;
     self.font_ascender = @floatFromInt(max_bearing_y);
     self.font_line_height = @floatFromInt(max_bearing_y + max_descent);
+
+    std.log.info("Font metrics: ascender={d} descent={d} line_height={d} cell={}x{}", .{
+        max_bearing_y, max_descent, max_bearing_y + max_descent, self.cell_width, self.cell_height,
+    });
 
     // Allocate atlas pixel data
     const atlas_size: usize = self.atlas_width * self.atlas_height;
