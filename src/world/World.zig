@@ -171,23 +171,26 @@ pub fn loadVisibleRegions(
         if (slot != null) active += 1;
     }
 
-    // Spawn new jobs for visible unloaded regions
+    // Spawn new jobs for visible unloaded regions (iterate existing regions, not coordinates)
     const region_path = self.region_dir_path orelse return;
 
-    var rx = min_rx;
-    while (rx <= max_rx) : (rx += 1) {
-        var rz = min_rz;
-        while (rz <= max_rz) : (rz += 1) {
-            if (active >= MAX_BG_JOBS) return;
+    var region_it = self.regions.iterator();
+    while (region_it.next()) |entry| {
+        if (active >= MAX_BG_JOBS) return;
 
-            const key = RegionKey{ .x = rx, .z = rz };
-            const region = self.regions.getPtr(key) orelse continue;
-            if (region.pixels != null) continue;
-            if (region.loading) continue;
+        const rx = entry.key_ptr.x;
+        const rz = entry.key_ptr.z;
 
-            const mca_path = std.fmt.allocPrint(self.allocator, "{s}{c}r.{d}.{d}.mca", .{
-                region_path, std.fs.path.sep, rx, rz,
-            }) catch continue;
+        // Skip if not visible
+        if (rx < min_rx or rx > max_rx or rz < min_rz or rz > max_rz) continue;
+
+        const region = entry.value_ptr;
+        if (region.pixels != null) continue;
+        if (region.loading) continue;
+
+        const mca_path = std.fmt.allocPrint(self.allocator, "{s}{c}r.{d}.{d}.mca", .{
+            region_path, std.fs.path.sep, rx, rz,
+        }) catch continue;
 
             const header = mca.readRegionHeader(self.io, mca_path) catch {
                 self.allocator.free(mca_path);
@@ -203,7 +206,7 @@ pub fn loadVisibleRegions(
                 .header = header,
                 .mca_path = mca_path,
                 .allocator = self.allocator,
-                .key = key,
+                .key = .{ .x = rx, .z = rz },
             };
 
             // Find free slot
@@ -229,7 +232,6 @@ pub fn loadVisibleRegions(
                 continue;
             };
             active += 1;
-        }
     }
 }
 
