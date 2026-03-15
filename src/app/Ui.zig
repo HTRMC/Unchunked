@@ -41,6 +41,10 @@ pub fn render(
     renderStatusBar(qr, tr, state, world, camera, selection, mouse_x, mouse_y, viewport_w, viewport_h);
 }
 
+const TAB_COLOR = QuadRenderer.Color{ .r = 0.2, .g = 0.2, .b = 0.2, .a = 0.9 };
+const TAB_ACTIVE_COLOR = QuadRenderer.Color{ .r = 0.3, .g = 0.3, .b = 0.35, .a = 1.0 };
+const TAB_TEXT_ACTIVE = TextRenderer.Color{ .r = 1.0, .g = 1.0, .b = 1.0, .a = 1.0 };
+
 fn renderToolbar(
     qr: *QuadRenderer,
     tr: *TextRenderer,
@@ -61,16 +65,39 @@ fn renderToolbar(
 
     // Left: app name + world name
     tr.drawText("Unchunked", PADDING, text_y, TEXT_SCALE, ACCENT_COLOR);
+    var x_pos = PADDING + tr.measureText("Unchunked", TEXT_SCALE);
+
     if (world) |w| {
         const name = World.extractWorldName(w.path);
-        var x = PADDING + tr.measureText("Unchunked", TEXT_SCALE) + PADDING;
-        tr.drawText("|", x, text_y, TEXT_SCALE, DIM_TEXT_COLOR);
-        x += tr.measureText("|", TEXT_SCALE) + PADDING;
-        tr.drawText(name, x, text_y, TEXT_SCALE, TEXT_COLOR);
+        x_pos += PADDING;
+        tr.drawText("|", x_pos, text_y, TEXT_SCALE, DIM_TEXT_COLOR);
+        x_pos += tr.measureText("|", TEXT_SCALE) + PADDING;
+        tr.drawText(name, x_pos, text_y, TEXT_SCALE, TEXT_COLOR);
+        x_pos += tr.measureText(name, TEXT_SCALE);
+
+        // Dimension tabs
+        x_pos += PADDING * 2;
+        const tab_names = [_][]const u8{ "Overworld", "Nether", "End" };
+        const tab_dims = [_]World.Dimension{ .overworld, .nether, .the_end };
+        const tab_h: f32 = TOOLBAR_HEIGHT - 4;
+        const tab_y: f32 = 2;
+        const tab_pad: f32 = 12;
+
+        for (tab_names, tab_dims) |tab_name, tab_dim| {
+            const tab_w = tr.measureText(tab_name, SMALL_TEXT_SCALE) + tab_pad * 2;
+            const is_active = w.dimension == tab_dim;
+
+            qr.drawQuad(x_pos, tab_y, tab_w, tab_h, if (is_active) TAB_ACTIVE_COLOR else TAB_COLOR);
+
+            const tab_text_y = tab_y + (tab_h - tr.font_line_height * SMALL_TEXT_SCALE) / 2;
+            tr.drawText(tab_name, x_pos + tab_pad, tab_text_y, SMALL_TEXT_SCALE, if (is_active) TAB_TEXT_ACTIVE else DIM_TEXT_COLOR);
+
+            x_pos += tab_w + 2;
+        }
     }
 
     // Right: shortcuts
-    const shortcuts = "Ctrl+O Open  Ctrl+G Goto";
+    const shortcuts = "1/2/3 Dim  Ctrl+O Open";
     const shortcuts_w = tr.measureText(shortcuts, SMALL_TEXT_SCALE);
     const shortcuts_y: f32 = (TOOLBAR_HEIGHT - tr.font_line_height * SMALL_TEXT_SCALE) / 2;
     tr.drawText(shortcuts, viewport_w - shortcuts_w - PADDING, shortcuts_y, SMALL_TEXT_SCALE, DIM_TEXT_COLOR);

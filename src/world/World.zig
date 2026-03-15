@@ -65,6 +65,11 @@ pub fn deinit(self: *World) void {
 }
 
 pub fn scanRegions(self: *World) !void {
+    // Free old region pixel data before clearing
+    var cleanup_it = self.regions.valueIterator();
+    while (cleanup_it.next()) |region| {
+        region.deinit(self.allocator);
+    }
     self.regions.clearRetainingCapacity();
 
     const region_path = try self.buildRegionPath();

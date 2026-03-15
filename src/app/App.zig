@@ -115,6 +115,33 @@ pub fn openWorld(self: *App, path: []const u8) void {
     });
 }
 
+pub fn switchDimension(self: *App, dim: World.Dimension) void {
+    const world = &(self.world orelse return);
+    if (world.dimension == dim) return;
+
+    world.setDimension(dim) catch |err| {
+        std.log.err("Failed to switch dimension: {}", .{err});
+        return;
+    };
+
+    self.selection.clear();
+
+    // Re-upload region pixel data
+    self.tile_renderer.clearSlots();
+    var it = world.regions.iterator();
+    while (it.next()) |entry| {
+        const region = entry.value_ptr;
+        if (region.pixels) |px| {
+            self.tile_renderer.uploadRegion(region.rx, region.rz, px);
+        }
+    }
+
+    std.log.info("Switched to {s} ({} chunks)", .{
+        @tagName(dim),
+        world.totalChunkCount(),
+    });
+}
+
 pub fn update(self: *App) !void {
     const frame_ctx = try self.renderer.beginFrame();
     const ctx = frame_ctx orelse return;
@@ -533,6 +560,12 @@ fn keyCallback(glfw_window: ?*glfw.Window, key: c_int, _: c_int, action: c_int, 
                     app.openWorld(p);
                     app.allocator.free(p);
                 }
+            } else if (key == glfw.GLFW_KEY_1) {
+                app.switchDimension(.overworld);
+            } else if (key == glfw.GLFW_KEY_2) {
+                app.switchDimension(.nether);
+            } else if (key == glfw.GLFW_KEY_3) {
+                app.switchDimension(.the_end);
             } else if (key == glfw.GLFW_KEY_G and (mods & glfw.GLFW_MOD_CONTROL != 0)) {
                 // Ctrl+G: Goto - read coordinates from stdin via Io
                 std.log.info("Enter coordinates (chunk X Z) in console:", .{});
