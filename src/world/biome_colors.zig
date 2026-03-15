@@ -47,12 +47,14 @@ pub fn isDryFoliageTinted(name: []const u8) bool {
     return std.mem.eql(u8, stripped, "leaf_litter");
 }
 
+const static_tint_map = std.StaticStringMap(Color).initComptime(.{
+    .{ "minecraft:birch_leaves", Color{ .r = 0x80, .g = 0xa7, .b = 0x55 } },
+    .{ "minecraft:spruce_leaves", Color{ .r = 0x61, .g = 0x99, .b = 0x61 } },
+    .{ "minecraft:lily_pad", Color{ .r = 0x20, .g = 0x80, .b = 0x30 } },
+});
+
 pub fn getStaticTint(name: []const u8) ?Color {
-    const stripped = if (std.mem.startsWith(u8, name, "minecraft:")) name["minecraft:".len..] else name;
-    if (std.mem.eql(u8, stripped, "birch_leaves")) return .{ .r = 0x80, .g = 0xa7, .b = 0x55 };
-    if (std.mem.eql(u8, stripped, "spruce_leaves")) return .{ .r = 0x61, .g = 0x99, .b = 0x61 };
-    if (std.mem.eql(u8, stripped, "lily_pad")) return .{ .r = 0x20, .g = 0x80, .b = 0x30 };
-    return null;
+    return static_tint_map.get(name);
 }
 
 /// Apply multiplicative tint: result = (tint * color) >> 8 per channel
@@ -69,22 +71,23 @@ pub const PLAINS_GRASS = Color{ .r = 0x91, .g = 0xbd, .b = 0x59 };
 pub const PLAINS_FOLIAGE = Color{ .r = 0x77, .g = 0xab, .b = 0x2f };
 pub const DEFAULT_WATER = Color{ .r = 0x3f, .g = 0x76, .b = 0xe4 };
 
-pub fn lookupBiome(name: []const u8) ?*const BiomeTint {
-    for (&biome_table) |*entry| {
-        if (std.mem.eql(u8, name, entry.name)) return entry;
-    }
-    return null;
+const BiomeTintValues = struct { grass: Color, foliage: Color, water: Color, dry_foliage: Color };
+
+const biome_map = std.StaticStringMap(BiomeTintValues).initComptime(biome_map_entries);
+
+pub fn lookupBiome(name: []const u8) ?BiomeTintValues {
+    return biome_map.get(name);
 }
 
 pub const DEFAULT_DRY_FOLIAGE = Color{ .r = 0xa3, .g = 0x75, .b = 0x46 };
 
 pub fn getBiomeTint(biome_name: []const u8, tint_type: TintType) Color {
-    if (lookupBiome(biome_name)) |biome| {
+    if (lookupBiome(biome_name)) |bt| {
         return switch (tint_type) {
-            .grass => biome.grass,
-            .foliage => biome.foliage,
-            .water => biome.water,
-            .dry_foliage => biome.dry_foliage,
+            .grass => bt.grass,
+            .foliage => bt.foliage,
+            .water => bt.water,
+            .dry_foliage => bt.dry_foliage,
         };
     }
     return switch (tint_type) {
@@ -94,6 +97,14 @@ pub fn getBiomeTint(biome_name: []const u8, tint_type: TintType) Color {
         .dry_foliage => DEFAULT_DRY_FOLIAGE,
     };
 }
+
+const biome_map_entries = blk: {
+    var entries: [biome_table.len]struct { []const u8, BiomeTintValues } = undefined;
+    for (biome_table, 0..) |e, i| {
+        entries[i] = .{ e.name, .{ .grass = e.grass, .foliage = e.foliage, .water = e.water, .dry_foliage = e.dry_foliage } };
+    }
+    break :blk entries;
+};
 
 const biome_table = [_]BiomeTint{
     .{ .name = "minecraft:badlands", .grass = .{ .r = 144, .g = 129, .b = 77 }, .foliage = .{ .r = 158, .g = 129, .b = 77 }, .water = .{ .r = 63, .g = 118, .b = 228 }, .dry_foliage = .{ .r = 163, .g = 128, .b = 70 } },

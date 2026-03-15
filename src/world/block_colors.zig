@@ -38,12 +38,23 @@ pub const BlockEntry = struct {
     tint: u8,
 };
 
+const ColorTint = struct { color: Color, tint: u8 };
+
+const block_map = std.StaticStringMap(ColorTint).initComptime(block_map_entries);
+
 pub fn lookup(name: []const u8) ?BlockEntry {
-    for (&block_table) |*entry| {
-        if (std.mem.eql(u8, name, entry.name)) return entry.*;
-    }
-    return null;
+    const ct = block_map.get(name) orelse return null;
+    return .{ .name = name, .color = ct.color, .tint = ct.tint };
 }
+
+const block_map_entries = blk: {
+    @setEvalBranchQuota(20000);
+    var entries: [block_table.len]struct { []const u8, ColorTint } = undefined;
+    for (block_table, 0..) |e, i| {
+        entries[i] = .{ e.name, .{ .color = e.color, .tint = e.tint } };
+    }
+    break :blk entries;
+};
 
 const block_table = [_]BlockEntry{
     .{ .name = "minecraft:acacia_button", .color = .{ .r = 168, .g = 90, .b = 50 }, .tint = 0 },

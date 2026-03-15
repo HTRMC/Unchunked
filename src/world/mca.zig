@@ -82,6 +82,10 @@ pub fn readChunkNbt(allocator: std.mem.Allocator, io: Io, path: []const u8, head
 }
 
 pub fn readChunkNbtFromFile(allocator: std.mem.Allocator, io: Io, file: File, header: *const RegionHeader, local_x: u5, local_z: u5) ?DecompressResult {
+    return readChunkNbtFromFileReuse(allocator, io, file, header, local_x, local_z, null);
+}
+
+pub fn readChunkNbtFromFileReuse(allocator: std.mem.Allocator, io: Io, file: File, header: *const RegionHeader, local_x: u5, local_z: u5, reuse_buf: ?[]u8) ?DecompressResult {
     const loc = header.locations[chunkIndex(local_x, local_z)];
     if (loc == 0) return null;
 
@@ -108,7 +112,7 @@ pub fn readChunkNbtFromFile(allocator: std.mem.Allocator, io: Io, file: File, he
 
     // Decompress based on compression type
     return switch (compression_type) {
-        2 => decompressZlib(allocator, compressed), // zlib
+        2 => decompressZlibInto(allocator, compressed, reuse_buf),
         else => null,
     };
 }
@@ -119,6 +123,11 @@ pub const DecompressResult = struct {
 };
 
 pub fn decompressZlib(allocator: std.mem.Allocator, compressed: []const u8) ?DecompressResult {
+    return decompressZlibInto(allocator, compressed, null);
+}
+
+/// Decompress zlib data, reusing `reuse_buf` if large enough. Falls back to allocating.
+pub fn decompressZlibInto(allocator: std.mem.Allocator, compressed: []const u8, reuse_buf: ?[]u8) ?DecompressResult {
     if (compressed.len < 6) return null;
 
     const deflate_data = compressed[2..];
@@ -129,11 +138,11 @@ pub fn decompressZlib(allocator: std.mem.Allocator, compressed: []const u8) ?Dec
     var decomp = flate.Decompress.init(&in_reader, .raw, &decomp_buf);
 
     const max_output = 4 * 1024 * 1024;
-    const output = allocator.alloc(u8, max_output) catch return null;
+    const output = reuse_buf orelse (allocator.alloc(u8, max_output) catch return null);
 
     var out_writer: std.Io.Writer = .fixed(output);
     const total = decomp.reader.streamRemaining(&out_writer) catch {
-        allocator.free(output);
+        if (reuse_buf == null) allocator.free(output);
         return null;
     };
 

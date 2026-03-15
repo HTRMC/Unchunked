@@ -45,6 +45,10 @@ pub fn renderPixels(pixels: []u8, allocator: std.mem.Allocator, io: std.Io, mca_
     const file = std.Io.Dir.openFile(.cwd(), io, mca_path, .{}) catch return;
     defer file.close(io);
 
+    // Reusable 4MB decompression buffer — allocated once, shared across all chunks
+    const nbt_buf = allocator.alloc(u8, 4 * 1024 * 1024) catch return;
+    defer allocator.free(nbt_buf);
+
     for (0..32) |z| {
         for (0..32) |x| {
             if (self.chunks[z][x] != .present) continue;
@@ -52,8 +56,7 @@ pub fn renderPixels(pixels: []u8, allocator: std.mem.Allocator, io: std.Io, mca_
             const lx: u5 = @intCast(x);
             const lz: u5 = @intCast(z);
 
-            const result = mca.readChunkNbtFromFile(allocator, io, file, header, lx, lz) orelse continue;
-            defer allocator.free(result.backing);
+            const result = mca.readChunkNbtFromFileReuse(allocator, io, file, header, lx, lz, nbt_buf) orelse continue;
 
             var chunk_pixels: chunk_renderer.ChunkPixels = undefined;
             chunk_renderer.renderChunk(result.data, &chunk_pixels);
