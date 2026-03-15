@@ -4,6 +4,7 @@ const Dir = Io.Dir;
 const mca = @import("mca.zig");
 const Region = @import("Region.zig");
 const Selection = @import("../app/Selection.zig");
+pub const ThreadPool = @import("thread_pool.zig").ThreadPool;
 
 const World = @This();
 
@@ -41,25 +42,46 @@ const RegionKeyContext = struct {
     }
 };
 
+const LoadJob = struct {
+    region: *Region,
+    header: mca.RegionHeader,
+    mca_path: []u8,
+    allocator: std.mem.Allocator,
+    key: RegionKey,
+    done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+};
+
+const MAX_INFLIGHT = 128;
+
 path: []u8,
 dimension: Dimension = .overworld,
 regions: RegionMap,
 allocator: std.mem.Allocator,
 io: Io,
 region_dir_path: ?[]u8 = null,
-bg_jobs: [MAX_BG_JOBS]?*BgJob = .{null} ** MAX_BG_JOBS,
+pool: *ThreadPool,
+pending_jobs: [MAX_INFLIGHT]?*LoadJob = .{null} ** MAX_INFLIGHT,
 
-pub fn init(allocator: std.mem.Allocator, io: Io, path: []u8) World {
+pub fn init(allocator: std.mem.Allocator, io: Io, path: []u8, pool: *ThreadPool) World {
     return .{
         .path = path,
         .regions = RegionMap.init(allocator),
         .allocator = allocator,
         .io = io,
+        .pool = pool,
     };
 }
 
 pub fn deinit(self: *World) void {
-    self.waitForBgJobs();
+    self.pool.waitIdle();
+    // Clean up any pending jobs
+    for (&self.pending_jobs) |*slot| {
+        if (slot.*) |job| {
+            self.allocator.free(job.mca_path);
+            self.allocator.destroy(job);
+            slot.* = null;
+        }
+    }
     var it = self.regions.valueIterator();
     while (it.next()) |region| {
         region.deinit(self.allocator);
@@ -69,19 +91,15 @@ pub fn deinit(self: *World) void {
     self.allocator.free(self.path);
 }
 
-fn waitForBgJobs(self: *World) void {
-    for (&self.bg_jobs) |*slot| {
-        const job = slot.* orelse continue;
-        if (job.thread) |t| t.join();
-        self.allocator.free(job.mca_path);
-        self.allocator.destroy(job);
-        slot.* = null;
-    }
-}
-
-/// Phase 1: Scan directory for region files and read headers only (fast, no pixel loading)
 pub fn scanRegions(self: *World) !void {
-    self.waitForBgJobs();
+    self.pool.waitIdle();
+    for (&self.pending_jobs) |*slot| {
+        if (slot.*) |job| {
+            self.allocator.free(job.mca_path);
+            self.allocator.destroy(job);
+            slot.* = null;
+        }
+    }
     var cleanup_it = self.regions.valueIterator();
     while (cleanup_it.next()) |region| {
         region.deinit(self.allocator);
@@ -118,58 +136,40 @@ pub fn scanRegions(self: *World) !void {
     std.log.info("Scanned {} regions for {s}", .{ self.regions.count(), @tagName(self.dimension) });
 }
 
-const MAX_BG_JOBS = 8;
-
-const BgJob = struct {
-    region: *Region,
-    header: mca.RegionHeader,
-    mca_path: []u8,
-    allocator: std.mem.Allocator,
-    key: RegionKey,
-    thread: ?std.Thread = null,
-    done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-};
-
-fn bgWorker(job: *BgJob) void {
+fn loadJobWorker(job: *LoadJob) void {
     const io = Io.Threaded.global_single_threaded.io();
     job.region.loadPixels(job.allocator, io, job.mca_path, &job.header);
     job.done.store(true, .release);
 }
 
-/// Called each frame: spawns background loaders for unloaded regions
-/// prioritized by distance from camera center (closest first).
 pub fn loadRegions(
     self: *World,
     center_rx: i32,
     center_rz: i32,
     new_keys: *std.ArrayListUnmanaged(RegionKey),
 ) void {
-    // Collect completed background jobs
-    for (&self.bg_jobs) |*slot| {
+    // Collect completed jobs
+    for (&self.pending_jobs) |*slot| {
         const job = slot.* orelse continue;
         if (!job.done.load(.acquire)) continue;
-
-        if (job.thread) |t| t.join();
 
         if (job.region.pixels != null) {
             new_keys.append(self.allocator, job.key) catch {};
         }
-
         self.allocator.free(job.mca_path);
         self.allocator.destroy(job);
         slot.* = null;
     }
 
-    // Count active jobs
+    // Count active
     var active: u32 = 0;
-    for (self.bg_jobs) |slot| {
+    for (self.pending_jobs) |slot| {
         if (slot != null) active += 1;
     }
+    if (active >= MAX_INFLIGHT) return;
 
-    if (active >= MAX_BG_JOBS) return;
-
-    // Collect unloaded regions and sort by distance from camera center
-    const max_pending = 256;
+    // Collect unloaded regions, sort by distance
+    const max_pending = 512;
     var pending: [max_pending]RegionKey = undefined;
     var pending_count: u32 = 0;
 
@@ -184,7 +184,6 @@ pub fn loadRegions(
 
     if (pending_count == 0) return;
 
-    // Sort by distance from camera center (closest first)
     const SortCtx = struct {
         cx: i32,
         cz: i32,
@@ -196,58 +195,52 @@ pub fn loadRegions(
     };
     std.mem.sortUnstable(RegionKey, pending[0..pending_count], SortCtx{ .cx = center_rx, .cz = center_rz }, SortCtx.lessThan);
 
-    // Spawn jobs for closest unloaded regions
     const region_path = self.region_dir_path orelse return;
 
     for (pending[0..pending_count]) |rk| {
-        if (active >= MAX_BG_JOBS) return;
+        if (active >= MAX_INFLIGHT) return;
 
         const region = self.regions.getPtr(rk) orelse continue;
+        if (region.pixels != null or region.loading) continue;
 
         const mca_path = std.fmt.allocPrint(self.allocator, "{s}{c}r.{d}.{d}.mca", .{
             region_path, std.fs.path.sep, rk.x, rk.z,
         }) catch continue;
 
-            const header = mca.readRegionHeader(self.io, mca_path) catch {
-                self.allocator.free(mca_path);
-                continue;
-            };
+        const header = mca.readRegionHeader(self.io, mca_path) catch {
+            self.allocator.free(mca_path);
+            continue;
+        };
 
-            const job = self.allocator.create(BgJob) catch {
-                self.allocator.free(mca_path);
-                continue;
-            };
-            job.* = .{
-                .region = region,
-                .header = header,
-                .mca_path = mca_path,
-                .allocator = self.allocator,
-                .key = rk,
-            };
+        const job = self.allocator.create(LoadJob) catch {
+            self.allocator.free(mca_path);
+            continue;
+        };
+        job.* = .{
+            .region = region,
+            .header = header,
+            .mca_path = mca_path,
+            .allocator = self.allocator,
+            .key = rk,
+        };
 
-            // Find free slot
-            var found_slot = false;
-            for (&self.bg_jobs) |*slot| {
-                if (slot.* == null) {
-                    slot.* = job;
-                    found_slot = true;
-                    break;
-                }
+        var found = false;
+        for (&self.pending_jobs) |*slot| {
+            if (slot.* == null) {
+                slot.* = job;
+                found = true;
+                break;
             }
-            if (!found_slot) {
-                self.allocator.free(mca_path);
-                self.allocator.destroy(job);
-                continue;
-            }
+        }
+        if (!found) {
+            self.allocator.free(mca_path);
+            self.allocator.destroy(job);
+            continue;
+        }
 
-            region.loading = true;
-            job.thread = std.Thread.spawn(.{}, bgWorker, .{job}) catch {
-                region.loading = false;
-                self.allocator.free(mca_path);
-                self.allocator.destroy(job);
-                continue;
-            };
-            active += 1;
+        region.loading = true;
+        self.pool.submitPtr(loadJobWorker, job);
+        active += 1;
     }
 }
 

@@ -25,6 +25,7 @@ tile_renderer: TileRenderer,
 camera: Camera,
 selection: Selection,
 world: ?World,
+thread_pool: World.ThreadPool,
 allocator: std.mem.Allocator,
 io: std.Io,
 environ_map: *std.process.Environ.Map,
@@ -42,6 +43,11 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, environ_map: *std.process.
     const text_renderer = try TextRenderer.init(&renderer);
     const tile_renderer = try TileRenderer.init(&renderer, allocator);
 
+    // Default thread count: number of CPU cores, minimum 2
+    const cpu_count = std.Thread.getCpuCount() catch 4;
+    const thread_count: u32 = @intCast(@max(2, @min(cpu_count, 32)));
+    const thread_pool = try World.ThreadPool.init(allocator, thread_count);
+
     const fb = window.getFramebufferSize();
 
     const app = App{
@@ -56,6 +62,7 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, environ_map: *std.process.
         },
         .selection = Selection.init(allocator),
         .world = null,
+        .thread_pool = thread_pool,
         .allocator = allocator,
         .io = io,
         .environ_map = environ_map,
@@ -75,6 +82,8 @@ pub fn setupCallbacks(self: *App) void {
 
 pub fn deinit(self: *App) void {
     vk.deviceWaitIdle(self.renderer.device) catch {};
+    if (self.world) |*w| w.deinit();
+    self.thread_pool.deinit();
     self.tile_renderer.deinit();
     self.text_renderer.deinit();
     self.quad_renderer.deinit();
@@ -87,7 +96,7 @@ pub fn openWorld(self: *App, path: []const u8) void {
     if (self.world) |*w| w.deinit();
 
     const owned_path = self.allocator.dupe(u8, path) catch return;
-    self.world = World.init(self.allocator, self.io, owned_path);
+    self.world = World.init(self.allocator, self.io, owned_path, &self.thread_pool);
     self.world.?.scanRegions() catch |err| {
         std.log.err("Failed to scan regions: {}", .{err});
         self.world.?.deinit();
