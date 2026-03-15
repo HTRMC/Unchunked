@@ -127,6 +127,9 @@ pub fn switchDimension(self: *App, dim: World.Dimension) void {
 }
 
 pub fn update(self: *App) !void {
+    // Load regions BEFORE starting the frame (uploads use separate command buffers)
+    self.processRegionLoading();
+
     const frame_ctx = try self.renderer.beginFrame();
     const ctx = frame_ctx orelse return;
 
@@ -278,17 +281,15 @@ pub fn update(self: *App) !void {
     try self.renderer.endFrame(ctx);
 }
 
-fn renderTileMap(self: *App) void {
+fn processRegionLoading(self: *App) void {
     const world = &(self.world orelse return);
 
-    // Load all unloaded regions in background, collect newly completed ones
     var new_keys: std.ArrayListUnmanaged(World.RegionKey) = .empty;
     defer new_keys.deinit(self.allocator);
     const center_rx: i32 = @intFromFloat(@floor(self.camera.center_x / 32.0));
     const center_rz: i32 = @intFromFloat(@floor(self.camera.center_z / 32.0));
     world.loadRegions(center_rx, center_rz, &new_keys);
 
-    // Upload newly loaded regions to the tile atlas
     for (new_keys.items) |key| {
         if (world.getRegion(key.x, key.z)) |region| {
             if (region.pixels) |px| {
@@ -296,8 +297,11 @@ fn renderTileMap(self: *App) void {
             }
         }
     }
+}
 
-    // Draw all regions that have pixels uploaded
+fn renderTileMap(self: *App) void {
+    const world = &(self.world orelse return);
+
     var region_it = world.regions.iterator();
     while (region_it.next()) |entry| {
         const region = entry.value_ptr;
