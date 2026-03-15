@@ -26,7 +26,7 @@ pub const Color = struct {
 };
 
 const VERTEX_SIZE = @sizeOf(MapVertex);
-const BUFFER_SIZE = MAX_VERTICES * VERTEX_SIZE;
+const BUFFER_SIZE = MAX_VERTICES * VERTEX_SIZE * Renderer.MAX_FRAMES_IN_FLIGHT;
 
 pipeline: vk.VkPipeline = null,
 pipeline_layout: vk.VkPipelineLayout = null,
@@ -62,8 +62,8 @@ pub fn deinit(self: *QuadRenderer) void {
     if (self.vertex_memory != null) vk.freeMemory(self.device, self.vertex_memory, null);
 }
 
-pub fn resetFrame(self: *QuadRenderer) void {
-    self.vertex_offset = 0;
+pub fn resetFrame(self: *QuadRenderer, frame_index: u32) void {
+    self.vertex_offset = frame_index * MAX_VERTICES;
     self.vertex_count = 0;
 }
 
@@ -72,7 +72,7 @@ pub fn beginFrame(self: *QuadRenderer) void {
 }
 
 pub fn drawQuad(self: *QuadRenderer, x: f32, y: f32, w: f32, h: f32, color: Color) void {
-    if (self.vertex_offset + self.vertex_count + VERTICES_PER_QUAD > MAX_VERTICES) return;
+    if (self.vertex_count + VERTICES_PER_QUAD > MAX_VERTICES) return;
 
     const base: [*]MapVertex = @ptrCast(@alignCast(self.mapped_data orelse return));
     const verts = base[self.vertex_offset + self.vertex_count ..][0..6];

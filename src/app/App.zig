@@ -214,7 +214,7 @@ pub fn update(self: *App) !void {
     self.tile_renderer.flush(cmd, &view_proj, self.renderer.current_frame);
 
     // Reset SSBO offset for this frame (allows multiple flushes without overwriting)
-    self.quad_renderer.resetFrame();
+    self.quad_renderer.resetFrame(self.renderer.current_frame);
 
     // Grid + selection overlays (world-space)
     self.renderGridOverlays();
