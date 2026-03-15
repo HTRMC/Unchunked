@@ -280,20 +280,10 @@ pub fn update(self: *App) !void {
 fn renderTileMap(self: *App) void {
     const world = &(self.world orelse return);
 
-    // Determine visible region range from camera
-    const range = self.camera.visibleChunkRange();
-    const min_rx = @divFloor(range.min_x, 32);
-    const max_rx = @divFloor(range.max_x, 32);
-    const min_rz = @divFloor(range.min_z, 32);
-    const max_rz = @divFloor(range.max_z, 32);
-
-    // Tell tile renderer what's visible so it only evicts off-screen slots
-    self.tile_renderer.setVisibleRange(min_rx, max_rx, min_rz, max_rz);
-
-    // Load any visible regions that haven't been loaded yet
+    // Load all unloaded regions in background, collect newly completed ones
     var new_keys: std.ArrayListUnmanaged(World.RegionKey) = .empty;
     defer new_keys.deinit(self.allocator);
-    world.loadVisibleRegions(min_rx, max_rx, min_rz, max_rz, &new_keys);
+    world.loadRegions(&new_keys);
 
     // Upload newly loaded regions to the tile atlas
     for (new_keys.items) |key| {
@@ -304,16 +294,12 @@ fn renderTileMap(self: *App) void {
         }
     }
 
-    // Draw all visible regions that have pixels uploaded
-    var rx = min_rx;
-    while (rx <= max_rx) : (rx += 1) {
-        var rz = min_rz;
-        while (rz <= max_rz) : (rz += 1) {
-            if (world.getRegion(rx, rz)) |region| {
-                if (region.pixels != null) {
-                    self.tile_renderer.drawRegion(rx, rz);
-                }
-            }
+    // Draw all regions that have pixels uploaded
+    var region_it = world.regions.iterator();
+    while (region_it.next()) |entry| {
+        const region = entry.value_ptr;
+        if (region.pixels != null) {
+            self.tile_renderer.drawRegion(region.rx, region.rz);
         }
     }
 }

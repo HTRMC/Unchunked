@@ -136,14 +136,10 @@ fn bgWorker(job: *BgJob) void {
     job.done.store(true, .release);
 }
 
-/// Called each frame: spawns background loaders for visible unloaded regions,
+/// Called each frame: spawns background loaders for unloaded regions,
 /// and collects completed ones into new_keys for atlas upload.
-pub fn loadVisibleRegions(
+pub fn loadRegions(
     self: *World,
-    min_rx: i32,
-    max_rx: i32,
-    min_rz: i32,
-    max_rz: i32,
     new_keys: *std.ArrayListUnmanaged(RegionKey),
 ) void {
     // Collect completed background jobs
@@ -151,15 +147,12 @@ pub fn loadVisibleRegions(
         const job = slot.* orelse continue;
         if (!job.done.load(.acquire)) continue;
 
-        // Join thread
         if (job.thread) |t| t.join();
 
-        // Report completion
         if (job.region.pixels != null) {
             new_keys.append(self.allocator, job.key) catch {};
         }
 
-        // Clean up
         self.allocator.free(job.mca_path);
         self.allocator.destroy(job);
         slot.* = null;
@@ -171,25 +164,20 @@ pub fn loadVisibleRegions(
         if (slot != null) active += 1;
     }
 
-    // Spawn new jobs for visible unloaded regions (iterate existing regions, not coordinates)
+    // Spawn new jobs for all unloaded regions
     const region_path = self.region_dir_path orelse return;
 
     var region_it = self.regions.iterator();
     while (region_it.next()) |entry| {
         if (active >= MAX_BG_JOBS) return;
 
-        const rx = entry.key_ptr.x;
-        const rz = entry.key_ptr.z;
-
-        // Skip if not visible
-        if (rx < min_rx or rx > max_rx or rz < min_rz or rz > max_rz) continue;
-
+        const rk = entry.key_ptr.*;
         const region = entry.value_ptr;
         if (region.pixels != null) continue;
         if (region.loading) continue;
 
         const mca_path = std.fmt.allocPrint(self.allocator, "{s}{c}r.{d}.{d}.mca", .{
-            region_path, std.fs.path.sep, rx, rz,
+            region_path, std.fs.path.sep, rk.x, rk.z,
         }) catch continue;
 
             const header = mca.readRegionHeader(self.io, mca_path) catch {
@@ -206,7 +194,7 @@ pub fn loadVisibleRegions(
                 .header = header,
                 .mca_path = mca_path,
                 .allocator = self.allocator,
-                .key = .{ .x = rx, .z = rz },
+                .key = rk,
             };
 
             // Find free slot
