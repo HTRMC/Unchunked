@@ -45,7 +45,7 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, environ_map: *std.process.
 
     // Default thread count: number of CPU cores, minimum 2
     const cpu_count = std.Thread.getCpuCount() catch 4;
-    const thread_count: u32 = @intCast(@max(2, cpu_count -| 2));
+    const thread_count: u32 = @intCast(@max(2, @min(cpu_count / 2, 32)));
     const thread_pool = try allocator.create(World.ThreadPool);
     try thread_pool.init(allocator, thread_count);
 
@@ -138,7 +138,7 @@ pub fn switchDimension(self: *App, dim: World.Dimension) void {
 }
 
 pub fn update(self: *App) !void {
-    // Load regions BEFORE starting the frame (uploads use separate command buffers)
+    // Stage new regions for upload (CPU-side: copies to staging buffer, creates VkImages)
     self.processRegionLoading();
 
     const frame_ctx = try self.renderer.beginFrame();
@@ -148,6 +148,9 @@ pub fn update(self: *App) !void {
 
     // Update camera viewport on resize
     self.camera.setViewportSize(ctx.extent.width, ctx.extent.height);
+
+    // Record pending texture uploads into this frame's command buffer (before render pass)
+    self.tile_renderer.recordUploads(cmd);
 
     // Transition: UNDEFINED → COLOR_ATTACHMENT_OPTIMAL
     const subresource_range: vk.VkImageSubresourceRange = .{
