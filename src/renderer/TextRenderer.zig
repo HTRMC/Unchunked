@@ -71,6 +71,7 @@ cell_width: u32 = 0,
 cell_height: u32 = 0,
 atlas_width: u32 = 0,
 atlas_height: u32 = 0,
+font_ascender: f32 = 0,
 font_line_height: f32 = 0,
 
 pub fn init(renderer: *Renderer) !TextRenderer {
@@ -129,7 +130,7 @@ pub fn drawText(self: *TextRenderer, text: []const u8, x: f32, y: f32, scale: f3
         const tex_v1 = (row * ch_f + m.height) / ah;
 
         const gx = cursor_x + m.bearing_x * scale;
-        const gy = y + (self.font_line_height - m.bearing_y) * scale;
+        const gy = y + (self.font_ascender - m.bearing_y) * scale;
         const gw = m.width * scale;
         const gh = m.height * scale;
 
@@ -196,6 +197,7 @@ fn createFontTexture(self: *TextRenderer, renderer: *Renderer) !void {
     var max_w: u32 = 0;
     var max_h: u32 = 0;
     var max_bearing_y: i32 = 0;
+    var max_descent: i32 = 0;
 
     for (0..NUM_CHARS) |i| {
         const ch: u32 = @intCast(FIRST_CHAR + i);
@@ -213,13 +215,16 @@ fn createFontTexture(self: *TextRenderer, renderer: *Renderer) !void {
         if (info.width > max_w) max_w = info.width;
         if (info.height > max_h) max_h = info.height;
         if (info.bearing_y > max_bearing_y) max_bearing_y = info.bearing_y;
+        const descent = @as(i32, @intCast(info.height)) - info.bearing_y;
+        if (descent > max_descent) max_descent = descent;
     }
 
-    self.cell_width = max_w + 2; // padding
+    self.cell_width = max_w + 2;
     self.cell_height = max_h + 2;
     self.atlas_width = self.cell_width * ATLAS_COLS;
     self.atlas_height = self.cell_height * ATLAS_ROWS;
-    self.font_line_height = @floatFromInt(max_bearing_y);
+    self.font_ascender = @floatFromInt(max_bearing_y);
+    self.font_line_height = @floatFromInt(max_bearing_y + max_descent);
 
     // Allocate atlas pixel data
     const atlas_size: usize = self.atlas_width * self.atlas_height;
