@@ -15,8 +15,8 @@ pub const Dimension = enum {
     pub fn regionPath(self: Dimension) []const u8 {
         return switch (self) {
             .overworld => "region",
-            .nether => "DIM-1/region",
-            .the_end => "DIM1/region",
+            .nether => "DIM-1" ++ std.fs.path.sep_str ++ "region",
+            .the_end => "DIM1" ++ std.fs.path.sep_str ++ "region",
         };
     }
 };
