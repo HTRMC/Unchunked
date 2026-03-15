@@ -1,0 +1,585 @@
+const std = @import("std");
+const builtin = @import("builtin");
+const glfw = @import("../platform/glfw.zig");
+const vk = @import("../platform/volk.zig");
+const Window = @import("../platform/Window.zig").Window;
+const Renderer = @import("../renderer/Renderer.zig");
+const QuadRenderer = @import("../renderer/QuadRenderer.zig");
+const Camera = @import("Camera.zig");
+const Selection = @import("Selection.zig");
+const World = @import("../world/World.zig");
+const file_dialog = @import("file_dialog.zig");
+const block_colors = @import("../world/block_colors.zig");
+
+const App = @This();
+
+const State = enum {
+    no_world,
+    viewing,
+    confirm_delete,
+};
+
+window: *Window,
+renderer: Renderer,
+quad_renderer: QuadRenderer,
+camera: Camera,
+selection: Selection,
+world: ?World,
+allocator: std.mem.Allocator,
+io: std.Io,
+environ_map: *std.process.Environ.Map,
+state: State = .no_world,
+title_buf: [512]u8 = undefined,
+mouse_x: f64 = 0,
+mouse_y: f64 = 0,
+left_down: bool = false,
+drag_start_x: i32 = 0,
+drag_start_z: i32 = 0,
+is_dragging: bool = false,
+
+pub fn init(allocator: std.mem.Allocator, io: std.Io, environ_map: *std.process.Environ.Map, window: *Window) !App {
+    var renderer = try Renderer.init(window);
+    const quad_renderer = try QuadRenderer.init(&renderer);
+
+    const fb = window.getFramebufferSize();
+
+    const app = App{
+        .window = window,
+        .renderer = renderer,
+        .quad_renderer = quad_renderer,
+        .camera = .{
+            .viewport_width = @floatFromInt(fb.width),
+            .viewport_height = @floatFromInt(fb.height),
+        },
+        .selection = Selection.init(allocator),
+        .world = null,
+        .allocator = allocator,
+        .io = io,
+        .environ_map = environ_map,
+    };
+
+    return app;
+}
+
+pub fn setupCallbacks(self: *App) void {
+    glfw.setWindowUserPointer(self.window.handle, self);
+    glfw.setFramebufferSizeCallback(self.window.handle, framebufferSizeCallback);
+    glfw.setScrollCallback(self.window.handle, scrollCallback);
+    glfw.setMouseButtonCallback(self.window.handle, mouseButtonCallback);
+    glfw.setCursorPosCallback(self.window.handle, cursorPosCallback);
+    glfw.setKeyCallback(self.window.handle, keyCallback);
+}
+
+pub fn deinit(self: *App) void {
+    vk.deviceWaitIdle(self.renderer.device) catch {};
+    self.quad_renderer.deinit();
+    self.renderer.deinit();
+    self.selection.deinit();
+    if (self.world) |*w| w.deinit();
+}
+
+pub fn openWorld(self: *App, path: []const u8) void {
+    if (self.world) |*w| w.deinit();
+
+    self.world = World.init(self.allocator, self.io, path);
+    self.world.?.scanRegions() catch |err| {
+        std.log.err("Failed to scan regions: {}", .{err});
+        self.world.?.deinit();
+        self.world = null;
+        return;
+    };
+
+    self.state = .viewing;
+    self.selection.clear();
+    self.camera.center_x = 0;
+    self.camera.center_z = 0;
+    self.updateTitle();
+
+    std.log.info("Opened world: {s} ({} chunks)", .{
+        World.extractWorldName(path),
+        self.world.?.totalChunkCount(),
+    });
+}
+
+pub fn update(self: *App) !void {
+    const frame_ctx = try self.renderer.beginFrame();
+    const ctx = frame_ctx orelse return;
+
+    const cmd = ctx.cmd;
+
+    // Update camera viewport on resize
+    self.camera.setViewportSize(ctx.extent.width, ctx.extent.height);
+
+    // Transition: UNDEFINED → COLOR_ATTACHMENT_OPTIMAL
+    const subresource_range: vk.VkImageSubresourceRange = .{
+        .aspectMask = vk.VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    };
+
+    const barrier_to_render: vk.VkImageMemoryBarrier = .{
+        .sType = vk.c.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext = null,
+        .srcAccessMask = 0,
+        .dstAccessMask = vk.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout = vk.VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = vk.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .srcQueueFamilyIndex = vk.c.VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = vk.c.VK_QUEUE_FAMILY_IGNORED,
+        .image = ctx.swapchain_image,
+        .subresourceRange = subresource_range,
+    };
+
+    vk.cmdPipelineBarrier(
+        cmd,
+        vk.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        vk.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        0,
+        0,
+        null,
+        0,
+        null,
+        1,
+        @ptrCast(&barrier_to_render),
+    );
+
+    // Begin dynamic rendering
+    const clear_value: vk.VkClearColorValue = .{ .float32 = .{ 0.15, 0.15, 0.15, 1.0 } };
+    const color_attachment: vk.VkRenderingAttachmentInfo = .{
+        .sType = vk.VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .pNext = null,
+        .imageView = ctx.swapchain_image_view,
+        .imageLayout = vk.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .resolveMode = 0,
+        .resolveImageView = null,
+        .resolveImageLayout = 0,
+        .loadOp = vk.VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = vk.VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = .{ .color = clear_value },
+    };
+
+    const rendering_info: vk.VkRenderingInfo = .{
+        .sType = vk.VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .pNext = null,
+        .flags = 0,
+        .renderArea = .{ .offset = .{ .x = 0, .y = 0 }, .extent = ctx.extent },
+        .layerCount = 1,
+        .viewMask = 0,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = @ptrCast(&color_attachment),
+        .pDepthAttachment = null,
+        .pStencilAttachment = null,
+    };
+
+    vk.cmdBeginRendering(cmd, &rendering_info);
+
+    // Set dynamic viewport/scissor
+    const viewport: vk.VkViewport = .{
+        .x = 0,
+        .y = 0,
+        .width = @floatFromInt(ctx.extent.width),
+        .height = @floatFromInt(ctx.extent.height),
+        .minDepth = 0.0,
+        .maxDepth = 1.0,
+    };
+    vk.cmdSetViewport(cmd, 0, 1, @ptrCast(&viewport));
+
+    const scissor: vk.VkRect2D = .{
+        .offset = .{ .x = 0, .y = 0 },
+        .extent = ctx.extent,
+    };
+    vk.cmdSetScissor(cmd, 0, 1, @ptrCast(&scissor));
+
+    // Emit quads
+    self.quad_renderer.beginFrame();
+    self.renderChunkMap();
+    self.renderGridOverlays();
+    self.renderSelection();
+    self.renderBoxSelection();
+
+    var view_proj = self.camera.getViewProjection();
+    self.quad_renderer.flush(cmd, &view_proj, self.renderer.current_frame);
+
+    vk.cmdEndRendering(cmd);
+
+    // Transition: COLOR_ATTACHMENT_OPTIMAL → PRESENT_SRC_KHR
+    const barrier_to_present: vk.VkImageMemoryBarrier = .{
+        .sType = vk.c.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext = null,
+        .srcAccessMask = vk.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstAccessMask = 0,
+        .oldLayout = vk.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .newLayout = vk.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .srcQueueFamilyIndex = vk.c.VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = vk.c.VK_QUEUE_FAMILY_IGNORED,
+        .image = ctx.swapchain_image,
+        .subresourceRange = subresource_range,
+    };
+
+    vk.cmdPipelineBarrier(
+        cmd,
+        vk.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        vk.VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        0,
+        0,
+        null,
+        0,
+        null,
+        1,
+        @ptrCast(&barrier_to_present),
+    );
+
+    try self.renderer.endFrame(ctx);
+}
+
+fn renderChunkMap(self: *App) void {
+    const world = &(self.world orelse return);
+
+    const range = self.camera.visibleChunkRange();
+
+    var it = world.regions.iterator();
+    while (it.next()) |entry| {
+        const region = entry.value_ptr;
+        const base_cx = region.rx * 32;
+        const base_cz = region.rz * 32;
+
+        for (0..32) |lz| {
+            for (0..32) |lx| {
+                if (region.chunks[lz][lx] != .present) continue;
+
+                const cx: i32 = base_cx + @as(i32, @intCast(lx));
+                const cz: i32 = base_cz + @as(i32, @intCast(lz));
+
+                // Frustum cull
+                if (cx < range.min_x or cx > range.max_x or cz < range.min_z or cz > range.max_z) continue;
+
+                const color = region.colors[lz][lx];
+                self.quad_renderer.drawQuad(
+                    @floatFromInt(cx),
+                    @floatFromInt(cz),
+                    1.0,
+                    1.0,
+                    .{
+                        .r = @as(f32, @floatFromInt(color[0])) / 255.0,
+                        .g = @as(f32, @floatFromInt(color[1])) / 255.0,
+                        .b = @as(f32, @floatFromInt(color[2])) / 255.0,
+                    },
+                );
+            }
+        }
+    }
+}
+
+fn renderGridOverlays(self: *App) void {
+    if (self.world == null) return;
+
+    const range = self.camera.visibleChunkRange();
+    const line_thickness: f32 = @floatCast(1.0 / self.camera.scale);
+
+    // Region grid (always visible): thick red lines at 32-chunk boundaries
+    {
+        const region_min_x = @divFloor(range.min_x, 32) * 32;
+        const region_max_x = (@divFloor(range.max_x, 32) + 1) * 32;
+        const region_min_z = @divFloor(range.min_z, 32) * 32;
+        const region_max_z = (@divFloor(range.max_z, 32) + 1) * 32;
+
+        const region_line_w = line_thickness * 3;
+        const region_color = QuadRenderer.Color{ .r = 0.8, .g = 0.2, .b = 0.2, .a = 0.7 };
+
+        // Vertical lines
+        var x = region_min_x;
+        while (x <= region_max_x) : (x += 32) {
+            self.quad_renderer.drawQuad(
+                @as(f32, @floatFromInt(x)) - region_line_w / 2,
+                @floatFromInt(range.min_z),
+                region_line_w,
+                @floatFromInt(range.max_z - range.min_z),
+                region_color,
+            );
+        }
+
+        // Horizontal lines
+        var z = region_min_z;
+        while (z <= region_max_z) : (z += 32) {
+            self.quad_renderer.drawQuad(
+                @floatFromInt(range.min_x),
+                @as(f32, @floatFromInt(z)) - region_line_w / 2,
+                @floatFromInt(range.max_x - range.min_x),
+                region_line_w,
+                region_color,
+            );
+        }
+    }
+
+    // Chunk grid (only when zoomed in enough)
+    if (self.camera.scale > 4) {
+        const chunk_line_w = line_thickness;
+        const chunk_color = QuadRenderer.Color{ .r = 0.4, .g = 0.4, .b = 0.4, .a = 0.3 };
+
+        var x = range.min_x;
+        while (x <= range.max_x) : (x += 1) {
+            if (@mod(x, 32) == 0) continue; // Skip region boundaries
+            self.quad_renderer.drawQuad(
+                @as(f32, @floatFromInt(x)) - chunk_line_w / 2,
+                @floatFromInt(range.min_z),
+                chunk_line_w,
+                @floatFromInt(range.max_z - range.min_z),
+                chunk_color,
+            );
+        }
+
+        var z = range.min_z;
+        while (z <= range.max_z) : (z += 1) {
+            if (@mod(z, 32) == 0) continue;
+            self.quad_renderer.drawQuad(
+                @floatFromInt(range.min_x),
+                @as(f32, @floatFromInt(z)) - chunk_line_w / 2,
+                @floatFromInt(range.max_x - range.min_x),
+                chunk_line_w,
+                chunk_color,
+            );
+        }
+    }
+}
+
+fn renderSelection(self: *App) void {
+    const range = self.camera.visibleChunkRange();
+    const selection_color = QuadRenderer.Color{ .r = 0.2, .g = 0.4, .b = 0.9, .a = 0.4 };
+
+    var it = self.selection.chunks.keyIterator();
+    while (it.next()) |key| {
+        if (key.x < range.min_x or key.x > range.max_x or key.z < range.min_z or key.z > range.max_z) continue;
+        self.quad_renderer.drawQuad(
+            @floatFromInt(key.x),
+            @floatFromInt(key.z),
+            1.0,
+            1.0,
+            selection_color,
+        );
+    }
+}
+
+fn renderBoxSelection(self: *App) void {
+    if (!self.selection.box_selecting) return;
+
+    const min_x = @min(self.selection.box_start_x, self.selection.box_end_x);
+    const max_x = @max(self.selection.box_start_x, self.selection.box_end_x);
+    const min_z = @min(self.selection.box_start_z, self.selection.box_end_z);
+    const max_z = @max(self.selection.box_start_z, self.selection.box_end_z);
+
+    const preview_color = QuadRenderer.Color{ .r = 0.3, .g = 0.5, .b = 1.0, .a = 0.25 };
+
+    var cx = min_x;
+    while (cx <= max_x) : (cx += 1) {
+        var cz = min_z;
+        while (cz <= max_z) : (cz += 1) {
+            self.quad_renderer.drawQuad(
+                @floatFromInt(cx),
+                @floatFromInt(cz),
+                1.0,
+                1.0,
+                preview_color,
+            );
+        }
+    }
+}
+
+fn updateTitle(self: *App) void {
+    const world_cursor = self.camera.screenToWorld(self.mouse_x, self.mouse_y);
+    const block_x: i32 = @intFromFloat(@floor(world_cursor.x * 16));
+    const block_z: i32 = @intFromFloat(@floor(world_cursor.z * 16));
+    const chunk_x: i32 = @intFromFloat(@floor(world_cursor.x));
+    const chunk_z: i32 = @intFromFloat(@floor(world_cursor.z));
+    const region_x = @divFloor(chunk_x, 32);
+    const region_z = @divFloor(chunk_z, 32);
+
+    const world_name = if (self.world) |*w|
+        World.extractWorldName(w.path)
+    else
+        "No world";
+
+    const selected = self.selection.count();
+
+    var title: []u8 = undefined;
+    if (self.state == .confirm_delete) {
+        title = std.fmt.bufPrint(&self.title_buf, "Unchunked — DELETE {d} chunks? Press Y to confirm, N to cancel\x00", .{selected}) catch return;
+    } else if (selected > 0) {
+        title = std.fmt.bufPrint(&self.title_buf, "Unchunked — {s} | Block: {d},{d} | Chunk: {d},{d} | Region: {d},{d} | Selected: {d}\x00", .{
+            world_name, block_x, block_z, chunk_x, chunk_z, region_x, region_z, selected,
+        }) catch return;
+    } else {
+        title = std.fmt.bufPrint(&self.title_buf, "Unchunked — {s} | Block: {d},{d} | Chunk: {d},{d} | Region: {d},{d}\x00", .{
+            world_name, block_x, block_z, chunk_x, chunk_z, region_x, region_z,
+        }) catch return;
+    }
+
+    glfw.setWindowTitle(self.window.handle, @ptrCast(title.ptr));
+}
+
+// GLFW Callbacks
+fn framebufferSizeCallback(glfw_window: ?*glfw.Window, _: c_int, _: c_int) callconv(.c) void {
+    const app = glfw.getWindowUserPointer(glfw_window.?, App) orelse return;
+    app.renderer.framebuffer_resized = true;
+}
+
+fn scrollCallback(glfw_window: ?*glfw.Window, _: f64, yoffset: f64) callconv(.c) void {
+    const app = glfw.getWindowUserPointer(glfw_window.?, App) orelse return;
+    app.camera.zoom(yoffset, app.mouse_x, app.mouse_y);
+}
+
+fn mouseButtonCallback(glfw_window: ?*glfw.Window, button: c_int, action: c_int, mods: c_int) callconv(.c) void {
+    const app = glfw.getWindowUserPointer(glfw_window.?, App) orelse return;
+
+    if (button == glfw.GLFW_MOUSE_BUTTON_MIDDLE or button == glfw.GLFW_MOUSE_BUTTON_RIGHT) {
+        if (action == glfw.GLFW_PRESS) {
+            app.camera.startPan(app.mouse_x, app.mouse_y);
+        } else if (action == glfw.GLFW_RELEASE) {
+            app.camera.endPan();
+        }
+    }
+
+    if (button == glfw.GLFW_MOUSE_BUTTON_LEFT) {
+        if (action == glfw.GLFW_PRESS) {
+            app.left_down = true;
+            app.is_dragging = false;
+            const world_pos = app.camera.screenToWorld(app.mouse_x, app.mouse_y);
+            app.drag_start_x = @intFromFloat(@floor(world_pos.x));
+            app.drag_start_z = @intFromFloat(@floor(world_pos.z));
+        } else if (action == glfw.GLFW_RELEASE) {
+            if (app.is_dragging) {
+                app.selection.endBoxSelect();
+            } else {
+                // Single click
+                const world_pos = app.camera.screenToWorld(app.mouse_x, app.mouse_y);
+                const cx: i32 = @intFromFloat(@floor(world_pos.x));
+                const cz: i32 = @intFromFloat(@floor(world_pos.z));
+
+                if (mods & glfw.GLFW_MOD_SHIFT != 0) {
+                    // Shift+click: toggle region
+                    const rx = @divFloor(cx, 32);
+                    const rz = @divFloor(cz, 32);
+                    app.selection.toggleRegion(rx, rz);
+                } else {
+                    app.selection.toggle(cx, cz);
+                }
+                app.updateTitle();
+            }
+            app.left_down = false;
+            app.is_dragging = false;
+        }
+    }
+
+    if (button == glfw.GLFW_MOUSE_BUTTON_RIGHT and action == glfw.GLFW_PRESS) {
+        if (app.selection.count() > 0) {
+            app.selection.clear();
+            app.updateTitle();
+        }
+    }
+}
+
+fn cursorPosCallback(glfw_window: ?*glfw.Window, xpos: f64, ypos: f64) callconv(.c) void {
+    const app = glfw.getWindowUserPointer(glfw_window.?, App) orelse return;
+    app.mouse_x = xpos;
+    app.mouse_y = ypos;
+
+    app.camera.updatePan(xpos, ypos);
+
+    // Box selection drag
+    if (app.left_down) {
+        const world_pos = app.camera.screenToWorld(xpos, ypos);
+        const cx: i32 = @intFromFloat(@floor(world_pos.x));
+        const cz: i32 = @intFromFloat(@floor(world_pos.z));
+
+        if (!app.is_dragging and (cx != app.drag_start_x or cz != app.drag_start_z)) {
+            app.is_dragging = true;
+            app.selection.startBoxSelect(app.drag_start_x, app.drag_start_z);
+        }
+
+        if (app.is_dragging) {
+            app.selection.updateBoxSelect(cx, cz);
+        }
+    }
+
+    app.updateTitle();
+}
+
+fn keyCallback(glfw_window: ?*glfw.Window, key: c_int, _: c_int, action: c_int, mods: c_int) callconv(.c) void {
+    const app = glfw.getWindowUserPointer(glfw_window.?, App) orelse return;
+
+    if (action != glfw.GLFW_PRESS) return;
+
+    switch (app.state) {
+        .confirm_delete => {
+            if (key == glfw.GLFW_KEY_Y) {
+                // Perform deletion
+                if (app.world) |*world| {
+                    const chunks = app.selection.getSelectedChunks(app.allocator) catch return;
+                    defer app.allocator.free(chunks);
+
+                    const deleted = world.deleteChunks(chunks) catch |err| {
+                        std.log.err("Delete failed: {}", .{err});
+                        app.state = .viewing;
+                        app.updateTitle();
+                        return;
+                    };
+
+                    std.log.info("Deleted {} chunks", .{deleted});
+                    app.selection.clear();
+                }
+                app.state = .viewing;
+                app.updateTitle();
+            } else if (key == glfw.GLFW_KEY_N or key == glfw.GLFW_KEY_ESCAPE) {
+                app.state = .viewing;
+                app.updateTitle();
+            }
+        },
+        .viewing => {
+            if (key == glfw.GLFW_KEY_DELETE and app.selection.count() > 0) {
+                app.state = .confirm_delete;
+                app.updateTitle();
+            } else if (key == glfw.GLFW_KEY_ESCAPE) {
+                if (app.selection.count() > 0) {
+                    app.selection.clear();
+                    app.updateTitle();
+                }
+            } else if (key == glfw.GLFW_KEY_O and (mods & glfw.GLFW_MOD_CONTROL != 0)) {
+                // Ctrl+O: Open folder dialog
+                const path = file_dialog.openFolderDialog(app.allocator, app.io, app.environ_map) catch return;
+                if (path) |p| {
+                    app.openWorld(p);
+                    app.allocator.free(p);
+                }
+            } else if (key == glfw.GLFW_KEY_G and (mods & glfw.GLFW_MOD_CONTROL != 0)) {
+                // Ctrl+G: Goto - read coordinates from stdin via Io
+                std.log.info("Enter coordinates (chunk X Z) in console:", .{});
+                const stdin_file = std.Io.File.stdin();
+                var buf: [256]u8 = undefined;
+                var iov = [_][]u8{buf[0..]};
+                const n = stdin_file.readStreaming(app.io, &iov) catch {
+                    std.log.warn("Ctrl+G requires -Dconsole=true", .{});
+                    return;
+                };
+                if (n == 0) return;
+                const trimmed = std.mem.trim(u8, buf[0..n], " \r\n\t");
+                var split = std.mem.splitScalar(u8, trimmed, ' ');
+                const x_str = split.next() orelse return;
+                const z_str = split.next() orelse return;
+                const x = std.fmt.parseInt(i32, x_str, 10) catch return;
+                const z = std.fmt.parseInt(i32, z_str, 10) catch return;
+                app.camera.goTo(@floatFromInt(x), @floatFromInt(z));
+                app.updateTitle();
+            }
+        },
+        .no_world => {
+            if (key == glfw.GLFW_KEY_O and (mods & glfw.GLFW_MOD_CONTROL != 0)) {
+                const path = file_dialog.openFolderDialog(app.allocator, app.io, app.environ_map) catch return;
+                if (path) |p| {
+                    app.openWorld(p);
+                    app.allocator.free(p);
+                }
+            }
+        },
+    }
+}
