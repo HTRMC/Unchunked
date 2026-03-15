@@ -37,9 +37,10 @@ pub fn render(
     viewport_w: f32,
     viewport_h: f32,
     thread_count: u32,
+    hover_block: []const u8,
 ) void {
     renderToolbar(qr, tr, state, world, selection, viewport_w);
-    renderStatusBar(qr, tr, state, world, camera, selection, mouse_x, mouse_y, viewport_w, viewport_h, thread_count);
+    renderStatusBar(qr, tr, state, world, camera, selection, mouse_x, mouse_y, viewport_w, viewport_h, thread_count, hover_block);
 }
 
 const TAB_COLOR = QuadRenderer.Color{ .r = 0.22, .g = 0.22, .b = 0.24, .a = 0.95 };
@@ -117,6 +118,7 @@ fn renderStatusBar(
     viewport_w: f32,
     viewport_h: f32,
     thread_count: u32,
+    hover_block: []const u8,
 ) void {
     _ = state;
     _ = world;
@@ -150,6 +152,16 @@ fn renderStatusBar(
     tr.drawText("Region: ", x, text_y, SMALL_TEXT_SCALE, DIM_TEXT_COLOR);
     x += tr.measureText("Region: ", SMALL_TEXT_SCALE);
     tr.drawFmt(x, text_y, SMALL_TEXT_SCALE, TEXT_COLOR, "{d},{d}", .{ region_x, region_z });
+    x += tr.measureFmt(SMALL_TEXT_SCALE, "{d},{d}", .{ region_x, region_z }) + PADDING * 2;
+
+    if (hover_block.len > 0) {
+        // Strip "minecraft:" prefix for cleaner display
+        const display_name = if (std.mem.startsWith(u8, hover_block, "minecraft:"))
+            hover_block["minecraft:".len..]
+        else
+            hover_block;
+        tr.drawText(display_name, x, text_y, SMALL_TEXT_SCALE, ACCENT_COLOR);
+    }
 
     // Right side: thread count + selection count
     var right_x = viewport_w - PADDING;

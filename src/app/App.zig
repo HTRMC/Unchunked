@@ -10,6 +10,8 @@ const TileRenderer = @import("../renderer/TileRenderer.zig");
 const Camera = @import("Camera.zig");
 const Selection = @import("Selection.zig");
 const World = @import("../world/World.zig");
+const mca = @import("../world/mca.zig");
+const chunk_renderer = @import("../world/chunk_renderer.zig");
 const Ui = @import("Ui.zig");
 const file_dialog = @import("file_dialog.zig");
 
@@ -37,6 +39,11 @@ left_down: bool = false,
 drag_start_x: i32 = 0,
 drag_start_z: i32 = 0,
 is_dragging: bool = false,
+// Block hover info cache
+hover_block_name: [128]u8 = .{0} ** 128,
+hover_block_len: u8 = 0,
+hover_cache_bx: i32 = std.math.minInt(i32),
+hover_cache_bz: i32 = std.math.minInt(i32),
 
 pub fn init(allocator: std.mem.Allocator, io: std.Io, environ_map: *std.process.Environ.Map, window: *Window) !App {
     var renderer = try Renderer.init(window);
@@ -141,6 +148,8 @@ pub fn switchDimension(self: *App, dim: World.Dimension) void {
 }
 
 pub fn update(self: *App) !void {
+    self.updateHoverBlock();
+
     const frame_ctx = try self.renderer.beginFrame();
     const ctx = frame_ctx orelse return;
 
@@ -261,7 +270,8 @@ pub fn update(self: *App) !void {
 
     self.text_renderer.beginFrame();
     const world_ptr: ?*const World = if (self.world) |*w| w else null;
-    Ui.render(&self.quad_renderer, &self.text_renderer, self.state, world_ptr, &self.camera, &self.selection, self.mouse_x, self.mouse_y, vw, vh, self.thread_pool.threadCount());
+    const hover_name = if (self.hover_block_len > 0) self.hover_block_name[0..self.hover_block_len] else "";
+    Ui.render(&self.quad_renderer, &self.text_renderer, self.state, world_ptr, &self.camera, &self.selection, self.mouse_x, self.mouse_y, vw, vh, self.thread_pool.threadCount(), hover_name);
 
     self.quad_renderer.flush(cmd, &screen_proj, self.renderer.current_frame);
     self.text_renderer.flush(cmd, &screen_proj, self.renderer.current_frame);
@@ -336,6 +346,44 @@ fn processRegionLoading(self: *App, frame_index: u32) void {
             return;
         }
     }
+}
+
+fn updateHoverBlock(self: *App) void {
+    const world = &(self.world orelse return);
+    const world_pos = self.camera.screenToWorld(self.mouse_x, self.mouse_y);
+    const block_x: i32 = @intFromFloat(@floor(world_pos.x * 16));
+    const block_z: i32 = @intFromFloat(@floor(world_pos.z * 16));
+
+    // Only re-read when block position changes
+    if (block_x == self.hover_cache_bx and block_z == self.hover_cache_bz) return;
+    self.hover_cache_bx = block_x;
+    self.hover_cache_bz = block_z;
+    self.hover_block_len = 0;
+
+    const region_path = world.region_dir_path orelse return;
+    const chunk_x: i32 = @intFromFloat(@floor(world_pos.x));
+    const chunk_z: i32 = @intFromFloat(@floor(world_pos.z));
+    const rx = @divFloor(chunk_x, 32);
+    const rz = @divFloor(chunk_z, 32);
+    const local_cx: u5 = @intCast(@mod(chunk_x, 32));
+    const local_cz: u5 = @intCast(@mod(chunk_z, 32));
+
+    const mca_path = std.fmt.allocPrint(self.allocator, "{s}{c}r.{d}.{d}.mca", .{
+        region_path, std.fs.path.sep, rx, rz,
+    }) catch return;
+    defer self.allocator.free(mca_path);
+
+    const header = mca.readRegionHeader(self.io, mca_path) catch return;
+    const result = mca.readChunkNbt(self.allocator, self.io, mca_path, &header, local_cx, local_cz) orelse return;
+    defer self.allocator.free(result.backing);
+
+    const bx: u4 = @intCast(@mod(block_x, 16));
+    const bz: u4 = @intCast(@mod(block_z, 16));
+    const name = chunk_renderer.getTopBlockAt(result.data, bx, bz) orelse return;
+
+    const len: u8 = @intCast(@min(name.len, self.hover_block_name.len));
+    @memcpy(self.hover_block_name[0..len], name[0..len]);
+    self.hover_block_len = len;
 }
 
 fn renderTileMap(self: *App) void {

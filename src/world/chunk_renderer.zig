@@ -4,6 +4,59 @@ const biome_colors = @import("biome_colors.zig");
 
 pub const ChunkPixels = [16][16][4]u8; // [z][x][rgba]
 
+/// Get the top block name at a specific (bx, bz) position within a chunk.
+/// Returns a slice into the nbt_data (valid as long as nbt_data is alive).
+pub fn getTopBlockAt(nbt_data: []const u8, bx: u4, bz: u4) ?[]const u8 {
+    var reader = NbtReader.init(nbt_data);
+
+    const root_type = reader.readByte() orelse return null;
+    if (root_type != 10) return null;
+    reader.skipString();
+
+    while (!reader.eof()) {
+        const tag_type = reader.readByte() orelse break;
+        if (tag_type == 0) break;
+        const name = reader.readShortString() orelse break;
+
+        if (tag_type == 9 and std.mem.eql(u8, name, "sections")) {
+            const list_tag_type = reader.readByte() orelse return null;
+            if (list_tag_type != 10) return null;
+            const section_count = reader.readInt() orelse return null;
+
+            const max_sections = 32;
+            var sections: [max_sections]SectionData = undefined;
+            var valid_sections: u32 = 0;
+
+            var i: i32 = 0;
+            while (i < section_count) : (i += 1) {
+                if (valid_sections < max_sections) {
+                    if (parseSingleSection(&reader)) |sec| {
+                        sections[valid_sections] = sec;
+                        valid_sections += 1;
+                    }
+                } else {
+                    reader.skipTag(10);
+                }
+            }
+
+            sortSectionsDescending(sections[0..valid_sections]);
+
+            for (sections[0..valid_sections]) |*sec| {
+                var y: i32 = 15;
+                while (y >= 0) : (y -= 1) {
+                    const block_name = getBlockAt(sec, bx, bz, y) orelse continue;
+                    if (block_colors.isTransparent(block_name)) continue;
+                    return block_name;
+                }
+            }
+            return null;
+        } else {
+            reader.skipTag(tag_type);
+        }
+    }
+    return null;
+}
+
 pub fn renderChunk(nbt_data: []const u8, pixels: *ChunkPixels) void {
     // Initialize to transparent
     for (pixels) |*row| {
