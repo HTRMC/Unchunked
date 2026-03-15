@@ -136,10 +136,10 @@ fn menuEndX(tr: *const TextRenderer) f32 {
 fn tabStartX(tr: *const TextRenderer, world: *const World) f32 {
     var x = menuEndX(tr) + PADDING;
     // Separator
-    x += tr.measureText("|", TEXT_SCALE) + PADDING;
+    x += tr.measureText("|", SMALL_TEXT_SCALE) + PADDING;
     // World name
     const name = World.extractWorldName(world.path);
-    x += tr.measureText(name, TEXT_SCALE) + PADDING * 2;
+    x += tr.measureText(name, SMALL_TEXT_SCALE) + PADDING * 2;
     return x;
 }
 
@@ -284,12 +284,11 @@ fn renderToolbar(
 ) void {
     qr.drawQuad(0, 0, viewport_w, TOOLBAR_HEIGHT, BG_COLOR);
 
-    const text_y: f32 = (TOOLBAR_HEIGHT - tr.font_line_height * TEXT_SCALE) / 2;
-    const small_text_y: f32 = (TOOLBAR_HEIGHT - tr.font_line_height * SMALL_TEXT_SCALE) / 2;
+    const text_y: f32 = (TOOLBAR_HEIGHT - tr.font_line_height * SMALL_TEXT_SCALE) / 2;
 
     if (state == .confirm_delete) {
         const selected = selection.count();
-        tr.drawFmt(PADDING, text_y, TEXT_SCALE, WARN_COLOR, "DELETE {d} chunks? Press Y to confirm, Esc to cancel", .{selected});
+        tr.drawFmt(PADDING, text_y, SMALL_TEXT_SCALE, WARN_COLOR, "DELETE {d} chunks? Press Y to confirm, Esc to cancel", .{selected});
         return;
     }
 
@@ -300,18 +299,18 @@ fn renderToolbar(
         if (is_open) {
             qr.drawQuad(rect.x, rect.y, rect.w, rect.h, MENU_HEADER_HOVER_BG);
         }
-        tr.drawText(header, rect.x + MENU_HEADER_PAD, small_text_y, SMALL_TEXT_SCALE, if (is_open) TEXT_COLOR else DIM_TEXT_COLOR);
+        tr.drawText(header, rect.x + MENU_HEADER_PAD, text_y, SMALL_TEXT_SCALE, if (is_open) TEXT_COLOR else DIM_TEXT_COLOR);
     }
 
     // Separator + world name + tabs
     if (world) |w| {
         var x_pos = menuEndX(tr) + PADDING;
-        tr.drawText("|", x_pos, text_y, TEXT_SCALE, DIM_TEXT_COLOR);
-        x_pos += tr.measureText("|", TEXT_SCALE) + PADDING;
+        tr.drawText("|", x_pos, text_y, SMALL_TEXT_SCALE, DIM_TEXT_COLOR);
+        x_pos += tr.measureText("|", SMALL_TEXT_SCALE) + PADDING;
 
         const name = World.extractWorldName(w.path);
-        tr.drawText(name, x_pos, text_y, TEXT_SCALE, TEXT_COLOR);
-        x_pos += tr.measureText(name, TEXT_SCALE) + PADDING * 2;
+        tr.drawText(name, x_pos, text_y, SMALL_TEXT_SCALE, TEXT_COLOR);
+        x_pos += tr.measureText(name, SMALL_TEXT_SCALE) + PADDING * 2;
 
         // Dimension tabs
         const tab_names = [_][]const u8{ "Overworld", "Nether", "End" };
