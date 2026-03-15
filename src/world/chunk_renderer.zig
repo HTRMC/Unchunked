@@ -77,6 +77,7 @@ fn parseSections(reader: *NbtReader, pixels: *ChunkPixels, heights: *[16][16]i32
     for (0..16) |z| {
         for (0..16) |x| {
             var water_height: ?i32 = null;
+            var water_biome: []const u8 = "";
             var found = false;
 
             for (sections[0..valid_sections]) |*sec| {
@@ -95,33 +96,39 @@ fn parseSections(reader: *NbtReader, pixels: *ChunkPixels, heights: *[16][16]i32
                     const abs_y = @as(i32, sec.y) * 16 + y;
 
                     if (block_colors.isWater(block_name)) {
-                        // First water block sets water height
                         if (water_height == null) {
                             water_height = abs_y;
+                            water_biome = getBiomeAt(sec, @intCast(x), y, @intCast(z));
                         }
-                        continue; // keep scanning for terrain below
+                        continue;
                     }
 
                     // Solid terrain block found
-                    var terrain_color = block_colors.lookup(block_name) orelse
-                        block_colors.Color{ .r = 180, .g = 100, .b = 200 };
+                    const entry = block_colors.lookup(block_name) orelse
+                        block_colors.BlockEntry{ .name = block_name, .color = .{ .r = 180, .g = 100, .b = 200 }, .tint = 0 };
 
-                    // Apply biome tint
                     const biome_name = getBiomeAt(sec, @intCast(x), y, @intCast(z));
-                    terrain_color = applyBiomeTint(terrain_color, block_name, biome_name);
+                    var terrain_color = applyTintFlags(entry.color, entry.tint, block_name, biome_name);
 
                     heights[z][x] = abs_y;
 
                     if (water_height) |wh| {
-                        // Blend biome-specific water over terrain based on depth
+                        // Get base water color and tint it with biome water tint
+                        const water_base = if (block_colors.lookup("minecraft:water")) |we|
+                            we.color
+                        else
+                            block_colors.Color{ .r = 176, .g = 176, .b = 176 };
+                        const water_tint = biome_colors.getBiomeTint(water_biome, .water);
+                        const tinted_water = biome_colors.applyTint(water_base, water_tint);
+
+                        // Blend tinted water over terrain based on depth
                         const depth = wh - abs_y;
                         const ratio = 0.5 - 0.5 / 40.0 * @as(f32, @floatFromInt(@min(depth, 40)));
                         const inv_ratio = 1.0 - ratio;
 
-                        const water_color = biome_colors.getBiomeTint(biome_name, .water);
-                        const wr: f32 = @floatFromInt(water_color.r);
-                        const wg: f32 = @floatFromInt(water_color.g);
-                        const wb: f32 = @floatFromInt(water_color.b);
+                        const wr: f32 = @floatFromInt(tinted_water.r);
+                        const wg: f32 = @floatFromInt(tinted_water.g);
+                        const wb: f32 = @floatFromInt(tinted_water.b);
                         const tr: f32 = @floatFromInt(terrain_color.r);
                         const tg: f32 = @floatFromInt(terrain_color.g);
                         const tb: f32 = @floatFromInt(terrain_color.b);
@@ -142,7 +149,12 @@ fn parseSections(reader: *NbtReader, pixels: *ChunkPixels, heights: *[16][16]i32
 
             // Water with no terrain below (deep ocean, void)
             if (water_height != null and !found) {
-                const wc = biome_colors.DEFAULT_WATER;
+                const water_base = if (block_colors.lookup("minecraft:water")) |we|
+                    we.color
+                else
+                    block_colors.Color{ .r = 176, .g = 176, .b = 176 };
+                const water_tint = biome_colors.getBiomeTint(water_biome, .water);
+                const wc = biome_colors.applyTint(water_base, water_tint);
                 pixels[z][x] = .{ wc.r, wc.g, wc.b, 255 };
                 heights[z][x] = water_height.?;
             }
@@ -150,28 +162,30 @@ fn parseSections(reader: *NbtReader, pixels: *ChunkPixels, heights: *[16][16]i32
     }
 }
 
-fn applyBiomeTint(color: block_colors.Color, block_name: []const u8, biome_name: []const u8) block_colors.Color {
-    // Static tints (biome-independent)
-    if (biome_colors.getStaticTint(block_name)) |tint| {
-        return biome_colors.applyTint(color, tint);
+fn applyTintFlags(color: block_colors.Color, tint_flags: u8, block_name: []const u8, biome_name: []const u8) block_colors.Color {
+    if (tint_flags == 0) return color;
+
+    // Static tint (biome-independent: birch/spruce leaves, lily pad)
+    if (tint_flags & block_colors.TINT_STATIC != 0) {
+        if (biome_colors.getStaticTint(block_name)) |tint| {
+            return biome_colors.applyTint(color, tint);
+        }
+        return color;
     }
 
-    // Grass-tinted blocks
-    if (biome_colors.isGrassTinted(block_name)) {
-        const tint = biome_colors.getBiomeTint(biome_name, .grass);
-        return biome_colors.applyTint(color, tint);
+    // Grass tint
+    if (tint_flags & block_colors.TINT_GRASS != 0) {
+        return biome_colors.applyTint(color, biome_colors.getBiomeTint(biome_name, .grass));
     }
 
-    // Foliage-tinted blocks
-    if (biome_colors.isFoliageTinted(block_name)) {
-        const tint = biome_colors.getBiomeTint(biome_name, .foliage);
-        return biome_colors.applyTint(color, tint);
+    // Foliage tint
+    if (tint_flags & block_colors.TINT_FOLIAGE != 0) {
+        return biome_colors.applyTint(color, biome_colors.getBiomeTint(biome_name, .foliage));
     }
 
-    // Dry foliage-tinted blocks (leaf litter)
-    if (biome_colors.isDryFoliageTinted(block_name)) {
-        const tint = biome_colors.getBiomeTint(biome_name, .dry_foliage);
-        return biome_colors.applyTint(color, tint);
+    // Dry foliage tint
+    if (tint_flags & block_colors.TINT_DRY_FOLIAGE != 0) {
+        return biome_colors.applyTint(color, biome_colors.getBiomeTint(biome_name, .dry_foliage));
     }
 
     return color;
