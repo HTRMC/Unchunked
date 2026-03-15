@@ -40,7 +40,7 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, environ_map: *std.process.
     var renderer = try Renderer.init(window);
     const quad_renderer = try QuadRenderer.init(&renderer);
     const text_renderer = try TextRenderer.init(&renderer);
-    const tile_renderer = try TileRenderer.init(&renderer);
+    const tile_renderer = try TileRenderer.init(&renderer, allocator);
 
     const fb = window.getFramebufferSize();
 

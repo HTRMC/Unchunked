@@ -360,9 +360,21 @@ fn createLogicalDevice(self: *Renderer) !void {
 
     const swapchain_ext = vk.VK_KHR_SWAPCHAIN_EXTENSION_NAME;
 
+    // Enable Vulkan 1.2 features (descriptor indexing)
+    var vk12_features: vk.VkPhysicalDeviceVulkan12Features = std.mem.zeroes(vk.VkPhysicalDeviceVulkan12Features);
+    vk12_features.sType = vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    vk12_features.descriptorIndexing = vk.VK_TRUE;
+    vk12_features.descriptorBindingPartiallyBound = vk.VK_TRUE;
+    vk12_features.descriptorBindingVariableDescriptorCount = vk.VK_TRUE;
+    vk12_features.runtimeDescriptorArray = vk.VK_TRUE;
+    vk12_features.shaderSampledImageArrayNonUniformIndexing = vk.VK_TRUE;
+    vk12_features.descriptorBindingUpdateUnusedWhilePending = vk.VK_TRUE;
+    vk12_features.descriptorBindingSampledImageUpdateAfterBind = vk.VK_TRUE;
+
     // Enable Vulkan 1.3 features (dynamic rendering)
     var vk13_features: vk.VkPhysicalDeviceVulkan13Features = std.mem.zeroes(vk.VkPhysicalDeviceVulkan13Features);
     vk13_features.sType = vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    vk13_features.pNext = &vk12_features;
     vk13_features.dynamicRendering = vk.VK_TRUE;
 
     const device_create_info: vk.VkDeviceCreateInfo = .{
