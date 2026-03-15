@@ -380,70 +380,49 @@ fn renderGridOverlays(self: *App) void {
     if (self.world == null) return;
 
     const range = self.camera.visibleChunkRange();
-    const line_thickness: f32 = @floatCast(1.0 / self.camera.scale);
+    const line_w: f32 = @floatCast(1.0 / self.camera.scale); // 1px on screen
 
-    // Region grid (always visible): thick red lines at 32-chunk boundaries
-    {
-        const region_min_x = @divFloor(range.min_x, 32) * 32;
-        const region_max_x = (@divFloor(range.max_x, 32) + 1) * 32;
-        const region_min_z = @divFloor(range.min_z, 32) * 32;
-        const region_max_z = (@divFloor(range.max_z, 32) + 1) * 32;
+    const min_xf: f32 = @floatFromInt(range.min_x);
+    const max_xf: f32 = @floatFromInt(range.max_x);
+    const min_zf: f32 = @floatFromInt(range.min_z);
+    const max_zf: f32 = @floatFromInt(range.max_z);
+    const span_x = max_xf - min_xf;
+    const span_z = max_zf - min_zf;
 
-        const region_line_w = line_thickness * 3;
-        const region_color = QuadRenderer.Color{ .r = 0.8, .g = 0.2, .b = 0.2, .a = 0.7 };
-
-        // Vertical lines
-        var x = region_min_x;
-        while (x <= region_max_x) : (x += 32) {
-            self.quad_renderer.drawQuad(
-                @as(f32, @floatFromInt(x)) - region_line_w / 2,
-                @floatFromInt(range.min_z),
-                region_line_w,
-                @floatFromInt(range.max_z - range.min_z),
-                region_color,
-            );
-        }
-
-        // Horizontal lines
-        var z = region_min_z;
-        while (z <= region_max_z) : (z += 32) {
-            self.quad_renderer.drawQuad(
-                @floatFromInt(range.min_x),
-                @as(f32, @floatFromInt(z)) - region_line_w / 2,
-                @floatFromInt(range.max_x - range.min_x),
-                region_line_w,
-                region_color,
-            );
-        }
-    }
-
-    // Chunk grid (only when zoomed in enough)
-    if (self.camera.scale > 4) {
-        const chunk_line_w = line_thickness;
-        const chunk_color = QuadRenderer.Color{ .r = 0.4, .g = 0.4, .b = 0.4, .a = 0.3 };
+    // Chunk grid: gray, 50% opacity — only when zoomed in (scale > 8 px/chunk)
+    const show_chunk_grid = self.camera.scale > 8;
+    if (show_chunk_grid) {
+        const chunk_color = QuadRenderer.Color{ .r = 0.66, .g = 0.66, .b = 0.66, .a = 0.5 };
 
         var x = range.min_x;
         while (x <= range.max_x) : (x += 1) {
-            if (@mod(x, 32) == 0) continue; // Skip region boundaries
-            self.quad_renderer.drawQuad(
-                @as(f32, @floatFromInt(x)) - chunk_line_w / 2,
-                @floatFromInt(range.min_z),
-                chunk_line_w,
-                @floatFromInt(range.max_z - range.min_z),
-                chunk_color,
-            );
+            if (@mod(x, 32) == 0) continue; // skip region boundaries
+            self.quad_renderer.drawQuad(@floatFromInt(x), min_zf, line_w, span_z, chunk_color);
         }
 
         var z = range.min_z;
         while (z <= range.max_z) : (z += 1) {
             if (@mod(z, 32) == 0) continue;
-            self.quad_renderer.drawQuad(
-                @floatFromInt(range.min_x),
-                @as(f32, @floatFromInt(z)) - chunk_line_w / 2,
-                @floatFromInt(range.max_x - range.min_x),
-                chunk_line_w,
-                chunk_color,
-            );
+            self.quad_renderer.drawQuad(min_xf, @floatFromInt(z), span_x, line_w, chunk_color);
+        }
+    }
+
+    // Region grid: black, 50% opacity — always visible
+    {
+        const region_color = QuadRenderer.Color{ .r = 0.0, .g = 0.0, .b = 0.0, .a = 0.5 };
+        const region_min_x = @divFloor(range.min_x, 32) * 32;
+        const region_max_x = (@divFloor(range.max_x, 32) + 1) * 32;
+        const region_min_z = @divFloor(range.min_z, 32) * 32;
+        const region_max_z = (@divFloor(range.max_z, 32) + 1) * 32;
+
+        var x = region_min_x;
+        while (x <= region_max_x) : (x += 32) {
+            self.quad_renderer.drawQuad(@floatFromInt(x), min_zf, line_w, span_z, region_color);
+        }
+
+        var z = region_min_z;
+        while (z <= region_max_z) : (z += 32) {
+            self.quad_renderer.drawQuad(min_xf, @floatFromInt(z), span_x, line_w, region_color);
         }
     }
 }
