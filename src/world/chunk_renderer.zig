@@ -168,6 +168,12 @@ fn applyBiomeTint(color: block_colors.Color, block_name: []const u8, biome_name:
         return biome_colors.applyTint(color, tint);
     }
 
+    // Dry foliage-tinted blocks (leaf litter)
+    if (biome_colors.isDryFoliageTinted(block_name)) {
+        const tint = biome_colors.getBiomeTint(biome_name, .dry_foliage);
+        return biome_colors.applyTint(color, tint);
+    }
+
     return color;
 }
 
