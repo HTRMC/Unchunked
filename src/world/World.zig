@@ -47,6 +47,7 @@ const LoadJob = struct {
     mca_path: []u8,
     allocator: std.mem.Allocator,
     key: RegionKey,
+    max_y: i32 = 319,
     pixels: ?[]u8 = null,
     done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 };
@@ -61,6 +62,7 @@ io: Io,
 region_dir_path: ?[]u8 = null,
 pool: *ThreadPool,
 pending_jobs: [MAX_INFLIGHT]?*LoadJob = .{null} ** MAX_INFLIGHT,
+max_y: i32 = 319,
 
 pub fn init(allocator: std.mem.Allocator, io: Io, path: []u8, pool: *ThreadPool) World {
     return .{
@@ -141,7 +143,7 @@ fn loadJobWorker(job: *LoadJob) void {
         job.done.store(true, .release);
         return;
     };
-    Region.renderPixels(px, job.allocator, io, job.mca_path, &header, job.region);
+    Region.renderPixels(px, job.allocator, io, job.mca_path, &header, job.region, job.max_y);
     job.pixels = px;
     job.done.store(true, .release);
 }
@@ -227,6 +229,7 @@ pub fn loadRegions(
             .mca_path = mca_path,
             .allocator = self.allocator,
             .key = rk,
+            .max_y = self.max_y,
         };
 
         var slot_idx: ?usize = null;

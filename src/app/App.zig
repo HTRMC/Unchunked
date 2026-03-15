@@ -44,6 +44,15 @@ hover_block_name: [128]u8 = .{0} ** 128,
 hover_block_len: u8 = 0,
 hover_cache_bx: i32 = std.math.minInt(i32),
 hover_cache_bz: i32 = std.math.minInt(i32),
+// Menu state
+open_menu: ?Ui.MenuId = null,
+hover_item: ?u8 = null,
+// Y-level slider
+y_level: i16 = 319,
+y_slider_dragging: bool = false,
+// Grid toggles
+show_chunk_grid: bool = true,
+show_region_grid: bool = true,
 
 pub fn init(allocator: std.mem.Allocator, io: std.Io, environ_map: *std.process.Environ.Map, window: *Window) !App {
     var renderer = try Renderer.init(window);
@@ -107,6 +116,7 @@ pub fn openWorld(self: *App, path: []const u8) void {
 
     const owned_path = self.allocator.dupe(u8, path) catch return;
     self.world = World.init(self.allocator, self.io, owned_path, self.thread_pool);
+    self.world.?.max_y = @as(i32, self.y_level);
     self.world.?.scanRegions() catch |err| {
         std.log.err("Failed to scan regions: {}", .{err});
         self.world.?.deinit();
@@ -271,7 +281,7 @@ pub fn update(self: *App) !void {
     self.text_renderer.beginFrame();
     const world_ptr: ?*const World = if (self.world) |*w| w else null;
     const hover_name = if (self.hover_block_len > 0) self.hover_block_name[0..self.hover_block_len] else "";
-    Ui.render(&self.quad_renderer, &self.text_renderer, self.state, world_ptr, &self.camera, &self.selection, self.mouse_x, self.mouse_y, vw, vh, self.thread_pool.threadCount(), hover_name);
+    Ui.render(&self.quad_renderer, &self.text_renderer, self.state, world_ptr, &self.camera, &self.selection, self.mouse_x, self.mouse_y, vw, vh, self.thread_pool.threadCount(), hover_name, self.open_menu, self.hover_item, self.y_level, self.show_chunk_grid, self.show_region_grid);
 
     self.quad_renderer.flush(cmd, &screen_proj, self.renderer.current_frame);
     self.text_renderer.flush(cmd, &screen_proj, self.renderer.current_frame);
@@ -379,7 +389,7 @@ fn updateHoverBlock(self: *App) void {
 
     const bx: u4 = @intCast(@mod(block_x, 16));
     const bz: u4 = @intCast(@mod(block_z, 16));
-    const name = chunk_renderer.getTopBlockAt(result.data, bx, bz) orelse return;
+    const name = chunk_renderer.getTopBlockAt(result.data, bx, bz, @as(i32, self.y_level)) orelse return;
 
     const len: u8 = @intCast(@min(name.len, self.hover_block_name.len));
     @memcpy(self.hover_block_name[0..len], name[0..len]);
@@ -444,8 +454,7 @@ fn renderGridOverlays(self: *App) void {
     const span_z = max_zf - min_zf;
 
     // Chunk grid: gray, 50% opacity — only when zoomed in (scale > 8 px/chunk)
-    const show_chunk_grid = self.camera.scale > 8;
-    if (show_chunk_grid) {
+    if (self.show_chunk_grid and self.camera.scale > 8) {
         const chunk_color = QuadRenderer.Color{ .r = 0.66, .g = 0.66, .b = 0.66, .a = 0.5 };
 
         var x = range.min_x;
@@ -462,7 +471,7 @@ fn renderGridOverlays(self: *App) void {
     }
 
     // Region grid: black, 50% opacity — always visible
-    {
+    if (self.show_region_grid) {
         const region_color = QuadRenderer.Color{ .r = 0.0, .g = 0.0, .b = 0.0, .a = 0.5 };
         const region_min_x = @divFloor(range.min_x, 32) * 32;
         const region_max_x = (@divFloor(range.max_x, 32) + 1) * 32;
@@ -533,6 +542,109 @@ fn screenOrtho(width: f32, height: f32) [16]f32 {
     };
 }
 
+fn executeMenuAction(self: *App, menu: Ui.MenuId, item_idx: u8) void {
+    switch (menu) {
+        .file => switch (item_idx) {
+            0 => { // Open World
+                const path = file_dialog.openFolderDialog(self.allocator, self.io, self.environ_map) catch return;
+                if (path) |p| {
+                    self.openWorld(p);
+                    self.allocator.free(p);
+                }
+            },
+            1 => { // Quit
+                glfw.setWindowShouldClose(self.window.handle, glfw.GLFW_TRUE);
+            },
+            else => {},
+        },
+        .view => switch (item_idx) {
+            0 => { // Goto
+                std.log.info("Enter coordinates (chunk X Z) in console:", .{});
+                const stdin_file = std.Io.File.stdin();
+                var buf: [256]u8 = undefined;
+                var iov = [_][]u8{buf[0..]};
+                const n = stdin_file.readStreaming(self.io, &iov) catch {
+                    std.log.warn("Goto requires -Dconsole=true", .{});
+                    return;
+                };
+                if (n == 0) return;
+                const trimmed = std.mem.trim(u8, buf[0..n], " \r\n\t");
+                var split = std.mem.splitScalar(u8, trimmed, ' ');
+                const x_str = split.next() orelse return;
+                const z_str = split.next() orelse return;
+                const x = std.fmt.parseInt(i32, x_str, 10) catch return;
+                const z = std.fmt.parseInt(i32, z_str, 10) catch return;
+                self.camera.goTo(@floatFromInt(x), @floatFromInt(z));
+            },
+            1 => { // Toggle Chunk Grid
+                self.show_chunk_grid = !self.show_chunk_grid;
+            },
+            2 => { // Toggle Region Grid
+                self.show_region_grid = !self.show_region_grid;
+            },
+            else => {},
+        },
+        .selection => switch (item_idx) {
+            0 => { // Clear
+                self.selection.clear();
+            },
+            1 => { // Delete Selected
+                if (self.selection.count() > 0) {
+                    self.state = .confirm_delete;
+                }
+            },
+            else => {},
+        },
+        .tools => switch (item_idx) {
+            0 => { // Threads +
+                const cur = self.thread_pool.threadCount();
+                self.thread_pool.resize(@min(cur + 1, 64));
+                self.resetPendingJobs();
+            },
+            1 => { // Threads -
+                const cur = self.thread_pool.threadCount();
+                if (cur > 1) {
+                    self.thread_pool.resize(cur - 1);
+                    self.resetPendingJobs();
+                }
+            },
+            else => {},
+        },
+    }
+}
+
+fn applyYLevel(self: *App) void {
+    const world = &(self.world orelse return);
+    if (world.max_y == @as(i32, self.y_level)) return;
+    world.max_y = @as(i32, self.y_level);
+    self.invalidateAllRegions();
+}
+
+fn invalidateAllRegions(self: *App) void {
+    const world = &(self.world orelse return);
+
+    // Cancel pending jobs
+    self.resetPendingJobs();
+
+    // Clear all region pixels
+    var it = world.regions.valueIterator();
+    while (it.next()) |region| {
+        if (region.pixels) |px| {
+            self.allocator.free(px);
+        }
+        region.pixels = null;
+        region.loading = false;
+    }
+
+    self.upload_queue.clearRetainingCapacity();
+    self.tile_renderer.clearSlots();
+
+    // Invalidate hover cache
+    self.hover_cache_bx = std.math.minInt(i32);
+    self.hover_cache_bz = std.math.minInt(i32);
+    self.hover_block_len = 0;
+}
+
 // GLFW Callbacks
 fn framebufferSizeCallback(glfw_window: ?*glfw.Window, _: c_int, _: c_int) callconv(.c) void {
     const app = glfw.getWindowUserPointer(glfw_window.?, App) orelse return;
@@ -541,6 +653,25 @@ fn framebufferSizeCallback(glfw_window: ?*glfw.Window, _: c_int, _: c_int) callc
 
 fn scrollCallback(glfw_window: ?*glfw.Window, _: f64, yoffset: f64) callconv(.c) void {
     const app = glfw.getWindowUserPointer(glfw_window.?, App) orelse return;
+
+    // If hovering over the Y slider area, adjust Y level
+    if (app.world != null and app.mouse_y >= 0 and app.mouse_y < Ui.TOOLBAR_HEIGHT) {
+        const fb = app.window.getFramebufferSize();
+        const vw: f32 = @floatFromInt(fb.width);
+        const slider_rect = Ui.getSliderTrackRect(&app.text_renderer, vw);
+        const mx: f32 = @floatCast(app.mouse_x);
+        if (mx >= slider_rect.x - 10 and mx <= slider_rect.x + slider_rect.w + 10) {
+            const delta: i16 = if (yoffset > 0) 4 else -4;
+            const new_y = std.math.clamp(@as(i32, app.y_level) + delta, -64, 319);
+            const new_y16: i16 = @intCast(new_y);
+            if (new_y16 != app.y_level) {
+                app.y_level = new_y16;
+                app.applyYLevel();
+            }
+            return;
+        }
+    }
+
     app.camera.zoom(yoffset, app.mouse_x, app.mouse_y);
 }
 
@@ -557,29 +688,91 @@ fn mouseButtonCallback(glfw_window: ?*glfw.Window, button: c_int, action: c_int,
 
     if (button == glfw.GLFW_MOUSE_BUTTON_LEFT) {
         if (action == glfw.GLFW_PRESS) {
+            // Check UI hit-testing first
+            const fb = app.window.getFramebufferSize();
+            const vw: f32 = @floatFromInt(fb.width);
+            const world_ptr: ?*const World = if (app.world) |*w| w else null;
+            const hit = Ui.hitTest(&app.text_renderer, app.mouse_x, app.mouse_y, vw, world_ptr, app.open_menu);
+
+            switch (hit) {
+                .menu_header => |menu| {
+                    if (app.open_menu) |current| {
+                        if (current == menu) {
+                            app.open_menu = null;
+                            app.hover_item = null;
+                        } else {
+                            app.open_menu = menu;
+                            app.hover_item = null;
+                        }
+                    } else {
+                        app.open_menu = menu;
+                        app.hover_item = null;
+                    }
+                    return;
+                },
+                .menu_item => |idx| {
+                    const menu = app.open_menu orelse return;
+                    app.open_menu = null;
+                    app.hover_item = null;
+                    app.executeMenuAction(menu, idx);
+                    return;
+                },
+                .dimension_tab => |dim| {
+                    app.open_menu = null;
+                    app.hover_item = null;
+                    app.switchDimension(dim);
+                    return;
+                },
+                .y_slider => {
+                    app.y_slider_dragging = true;
+                    app.open_menu = null;
+                    app.hover_item = null;
+                    const new_y = Ui.sliderValueFromX(&app.text_renderer, vw, app.mouse_x);
+                    if (new_y != app.y_level) {
+                        app.y_level = new_y;
+                    }
+                    return;
+                },
+                .none => {
+                    // Click outside any UI element — close menu if open
+                    if (app.open_menu != null) {
+                        app.open_menu = null;
+                        app.hover_item = null;
+                        return;
+                    }
+                },
+            }
+
+            // World interaction (only if not consumed by UI)
+            if (app.mouse_y < Ui.TOOLBAR_HEIGHT) return;
+
             app.left_down = true;
             app.is_dragging = false;
             const world_pos = app.camera.screenToWorld(app.mouse_x, app.mouse_y);
             app.drag_start_x = @intFromFloat(@floor(world_pos.x));
             app.drag_start_z = @intFromFloat(@floor(world_pos.z));
         } else if (action == glfw.GLFW_RELEASE) {
+            if (app.y_slider_dragging) {
+                app.y_slider_dragging = false;
+                app.applyYLevel();
+                return;
+            }
+
             if (app.is_dragging) {
                 app.selection.endBoxSelect();
-            } else {
+            } else if (app.left_down) {
                 // Single click
                 const world_pos = app.camera.screenToWorld(app.mouse_x, app.mouse_y);
                 const cx: i32 = @intFromFloat(@floor(world_pos.x));
                 const cz: i32 = @intFromFloat(@floor(world_pos.z));
 
                 if (mods & glfw.GLFW_MOD_SHIFT != 0) {
-                    // Shift+click: toggle region
                     const rx = @divFloor(cx, 32);
                     const rz = @divFloor(cz, 32);
                     app.selection.toggleRegion(rx, rz);
                 } else {
                     app.selection.toggle(cx, cz);
                 }
-        
             }
             app.left_down = false;
             app.is_dragging = false;
@@ -587,9 +780,11 @@ fn mouseButtonCallback(glfw_window: ?*glfw.Window, button: c_int, action: c_int,
     }
 
     if (button == glfw.GLFW_MOUSE_BUTTON_RIGHT and action == glfw.GLFW_PRESS) {
-        if (app.selection.count() > 0) {
+        if (app.open_menu != null) {
+            app.open_menu = null;
+            app.hover_item = null;
+        } else if (app.selection.count() > 0) {
             app.selection.clear();
-    
         }
     }
 }
@@ -598,6 +793,36 @@ fn cursorPosCallback(glfw_window: ?*glfw.Window, xpos: f64, ypos: f64) callconv(
     const app = glfw.getWindowUserPointer(glfw_window.?, App) orelse return;
     app.mouse_x = xpos;
     app.mouse_y = ypos;
+
+    // Y slider dragging
+    if (app.y_slider_dragging) {
+        const fb = app.window.getFramebufferSize();
+        const vw: f32 = @floatFromInt(fb.width);
+        app.y_level = Ui.sliderValueFromX(&app.text_renderer, vw, xpos);
+        return;
+    }
+
+    // Update hovered menu item
+    if (app.open_menu) |menu| {
+        app.hover_item = Ui.getHoveredMenuItem(&app.text_renderer, xpos, ypos, menu);
+
+        // If hovering over a different menu header while a menu is open, switch to it
+        if (ypos >= 0 and ypos < Ui.TOOLBAR_HEIGHT) {
+            const fb = app.window.getFramebufferSize();
+            const vw: f32 = @floatFromInt(fb.width);
+            const world_ptr: ?*const World = if (app.world) |*w| w else null;
+            const hit = Ui.hitTest(&app.text_renderer, xpos, ypos, vw, world_ptr, app.open_menu);
+            switch (hit) {
+                .menu_header => |new_menu| {
+                    if (new_menu != menu) {
+                        app.open_menu = new_menu;
+                        app.hover_item = null;
+                    }
+                },
+                else => {},
+            }
+        }
+    }
 
     app.camera.updatePan(xpos, ypos);
 
@@ -649,13 +874,14 @@ fn keyCallback(glfw_window: ?*glfw.Window, key: c_int, _: c_int, action: c_int, 
             }
         },
         .viewing => {
-            if (key == glfw.GLFW_KEY_DELETE and app.selection.count() > 0) {
+            if (app.open_menu != null and key == glfw.GLFW_KEY_ESCAPE) {
+                app.open_menu = null;
+                app.hover_item = null;
+            } else if (key == glfw.GLFW_KEY_DELETE and app.selection.count() > 0) {
                 app.state = .confirm_delete;
-        
             } else if (key == glfw.GLFW_KEY_ESCAPE) {
                 if (app.selection.count() > 0) {
                     app.selection.clear();
-            
                 }
             } else if (key == glfw.GLFW_KEY_O and (mods & glfw.GLFW_MOD_CONTROL != 0)) {
                 // Ctrl+O: Open folder dialog

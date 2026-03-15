@@ -39,7 +39,7 @@ pub fn loadFromHeader(rx: i32, rz: i32, header: *const mca.RegionHeader) Region 
 
 /// Render pixels into an externally-allocated buffer.
 /// Only reads self.chunks (immutable after scanRegions).
-pub fn renderPixels(pixels: []u8, allocator: std.mem.Allocator, io: std.Io, mca_path: []const u8, header: *const mca.RegionHeader, self: *Region) void {
+pub fn renderPixels(pixels: []u8, allocator: std.mem.Allocator, io: std.Io, mca_path: []const u8, header: *const mca.RegionHeader, self: *Region, max_y: i32) void {
     // Populate chunk presence from header
     for (0..32) |z| {
         for (0..32) |x| {
@@ -67,7 +67,7 @@ pub fn renderPixels(pixels: []u8, allocator: std.mem.Allocator, io: std.Io, mca_
             const result = mca.readChunkNbtFromFileReuse(allocator, io, file, header, lx, lz, nbt_buf, compressed_buf) orelse continue;
 
             var chunk_pixels: chunk_renderer.ChunkPixels = undefined;
-            chunk_renderer.renderChunk(result.data, &chunk_pixels);
+            chunk_renderer.renderChunk(result.data, &chunk_pixels, max_y);
 
             const base_x: usize = @as(usize, lx) * 16;
             const base_z: usize = @as(usize, lz) * 16;

@@ -6,7 +6,7 @@ pub const ChunkPixels = [16][16][4]u8; // [z][x][rgba]
 
 /// Get the top block name at a specific (bx, bz) position within a chunk.
 /// Returns a slice into the nbt_data (valid as long as nbt_data is alive).
-pub fn getTopBlockAt(nbt_data: []const u8, bx: u4, bz: u4) ?[]const u8 {
+pub fn getTopBlockAt(nbt_data: []const u8, bx: u4, bz: u4, max_y: i32) ?[]const u8 {
     var reader = NbtReader.init(nbt_data);
 
     const root_type = reader.readByte() orelse return null;
@@ -42,7 +42,10 @@ pub fn getTopBlockAt(nbt_data: []const u8, bx: u4, bz: u4) ?[]const u8 {
             sortSectionsDescending(sections[0..valid_sections]);
 
             for (sections[0..valid_sections]) |*sec| {
-                var y: i32 = 15;
+                const sec_base = @as(i32, sec.y) * 16;
+                if (sec_base > max_y) continue;
+                const local_max: i32 = @min(15, max_y - sec_base);
+                var y: i32 = local_max;
                 while (y >= 0) : (y -= 1) {
                     const block_name = getBlockAt(sec, bx, bz, y) orelse continue;
                     if (block_colors.isTransparent(block_name)) continue;
@@ -57,7 +60,7 @@ pub fn getTopBlockAt(nbt_data: []const u8, bx: u4, bz: u4) ?[]const u8 {
     return null;
 }
 
-pub fn renderChunk(nbt_data: []const u8, pixels: *ChunkPixels) void {
+pub fn renderChunk(nbt_data: []const u8, pixels: *ChunkPixels, max_y: i32) void {
     // Initialize to transparent
     for (pixels) |*row| {
         for (row) |*px| {
@@ -85,7 +88,7 @@ pub fn renderChunk(nbt_data: []const u8, pixels: *ChunkPixels) void {
 
         if (tag_type == 9 and std.mem.eql(u8, name, "sections")) {
             found_sections = true;
-            parseSections(&reader, pixels, &heights);
+            parseSections(&reader, pixels, &heights, max_y);
             break;
         } else {
             reader.skipTag(tag_type);
@@ -98,7 +101,7 @@ pub fn renderChunk(nbt_data: []const u8, pixels: *ChunkPixels) void {
     applyHeightShading(pixels, &heights);
 }
 
-fn parseSections(reader: *NbtReader, pixels: *ChunkPixels, heights: *[16][16]i32) void {
+fn parseSections(reader: *NbtReader, pixels: *ChunkPixels, heights: *[16][16]i32, max_y: i32) void {
     const list_tag_type = reader.readByte() orelse return;
     if (list_tag_type != 10) { // sections must be list of compounds
         return;
@@ -136,11 +139,15 @@ fn parseSections(reader: *NbtReader, pixels: *ChunkPixels, heights: *[16][16]i32
             for (sections[0..valid_sections]) |*sec| {
                 if (found) break;
 
+                const sec_base = @as(i32, sec.y) * 16;
+                if (sec_base > max_y) continue;
+                const local_max: i32 = @min(15, max_y - sec_base);
+
                 const lx: u4 = @intCast(x);
                 const lz: u4 = @intCast(z);
 
                 // Scan Y levels in this section (top-down)
-                var y: i32 = 15;
+                var y: i32 = local_max;
                 while (y >= 0) : (y -= 1) {
                     const block_name = getBlockAt(sec, lx, lz, y) orelse continue;
 

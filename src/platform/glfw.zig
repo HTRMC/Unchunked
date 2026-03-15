@@ -70,6 +70,10 @@ pub fn windowShouldClose(window: *Window) c_int {
     return c.glfwWindowShouldClose(window);
 }
 
+pub fn setWindowShouldClose(window: *Window, value: c_int) void {
+    c.glfwSetWindowShouldClose(window, value);
+}
+
 pub fn pollEvents() void {
     c.glfwPollEvents();
 }
