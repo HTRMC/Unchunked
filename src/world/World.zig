@@ -61,7 +61,6 @@ io: Io,
 region_dir_path: ?[]u8 = null,
 pool: *ThreadPool,
 pending_jobs: [MAX_INFLIGHT]?*LoadJob = .{null} ** MAX_INFLIGHT,
-pending_keys: [MAX_INFLIGHT]RegionKey = .{RegionKey{ .x = 0, .z = 0 }} ** MAX_INFLIGHT,
 
 pub fn init(allocator: std.mem.Allocator, io: Io, path: []u8, pool: *ThreadPool) World {
     return .{
@@ -142,12 +141,11 @@ fn loadJobWorker(job: *LoadJob) void {
         job.done.store(true, .release);
         return;
     };
-    // Use page_allocator for pixel buffers to guarantee no overlap between threads
-    const px = std.heap.page_allocator.alloc(u8, Region.PIXEL_DATA_SIZE) catch {
+    const px = job.allocator.alloc(u8, Region.PIXEL_DATA_SIZE) catch {
         job.done.store(true, .release);
         return;
     };
-    Region.renderPixels(px, job.allocator, io, job.mca_path, &header, job.region, job.key.x, job.key.z);
+    Region.renderPixels(px, job.allocator, io, job.mca_path, &header, job.region);
     job.pixels = px;
     job.done.store(true, .release);
 }
@@ -163,25 +161,14 @@ pub fn loadRegions(
     center_rz: i32,
     completed: *std.ArrayListUnmanaged(CompletedRegion),
 ) void {
-    // Collect completed jobs — use parallel key array (never touched by workers)
-    for (&self.pending_jobs, 0..) |*slot, slot_i| {
+    // Collect completed jobs
+    for (&self.pending_jobs) |*slot| {
         const job = slot.* orelse continue;
         if (!job.done.load(.acquire)) continue;
 
-        const safe_key = self.pending_keys[slot_i];
         if (job.pixels) |px| {
-            // DEBUG: overwrite pixels on MAIN THREAD using saved key
-            const r: u8 = @bitCast(@as(i8, @truncate(safe_key.x *% 3)));
-            const g: u8 = @bitCast(@as(i8, @truncate(safe_key.z *% 3)));
-            var pi: usize = 0;
-            while (pi < Region.PIXEL_DATA_SIZE) : (pi += 4) {
-                px[pi + 0] = r;
-                px[pi + 1] = g;
-                px[pi + 2] = 128;
-                px[pi + 3] = 255;
-            }
             job.region.pixels = px;
-            completed.append(self.allocator, .{ .key = safe_key, .pixels = px }) catch {};
+            completed.append(self.allocator, .{ .key = job.key, .pixels = px }) catch {};
         }
         job.region.loading = false;
         self.allocator.free(job.mca_path);
@@ -260,7 +247,6 @@ pub fn loadRegions(
         }
 
         self.pending_jobs[slot_idx.?] = job;
-        self.pending_keys[slot_idx.?] = rk;
 
         if (!self.pool.submitPtr(loadJobWorker, job)) {
             self.pending_jobs[slot_idx.?] = null;

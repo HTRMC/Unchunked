@@ -339,12 +339,14 @@ fn processRegionLoading(self: *App, frame_index: u32) void {
 }
 
 fn renderTileMap(self: *App) void {
-    if (self.world == null) return;
+    const world = &(self.world orelse return);
 
-    // Iterate uploaded textures directly — keys came from job.key during upload
-    var tex_it = self.tile_renderer.region_textures.iterator();
-    while (tex_it.next()) |entry| {
-        self.tile_renderer.drawRegion(entry.key_ptr.rx, entry.key_ptr.rz);
+    var region_it = world.regions.iterator();
+    while (region_it.next()) |entry| {
+        const region = entry.value_ptr;
+        if (region.pixels != null) {
+            self.tile_renderer.drawRegion(region.rx, region.rz);
+        }
     }
 }
 
