@@ -121,10 +121,12 @@ pub const ThreadPool = struct {
 
     pub fn resize(self: *ThreadPool, new_count: u32) void {
         if (new_count == self.threads.len or new_count == 0) return;
-        self.waitIdle();
+
+        // Signal shutdown and join all threads
         self.shutdown.store(true, .release);
         for (self.threads) |t| t.join();
 
+        // Drain remaining queue items (just skip them)
         self.shutdown.store(false, .release);
         self.enqueue_pos.store(0, .release);
         self.dequeue_pos.store(0, .release);

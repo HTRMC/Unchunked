@@ -329,6 +329,12 @@ fn renderTileMap(self: *App) void {
 fn renderLoadingIndicators(self: *App) void {
     const world = &(self.world orelse return);
 
+    const range = self.camera.visibleChunkRange();
+    const min_rx = @divFloor(range.min_x, 32);
+    const max_rx = @divFloor(range.max_x, 32);
+    const min_rz = @divFloor(range.min_z, 32);
+    const max_rz = @divFloor(range.max_z, 32);
+
     const loading_bg = QuadRenderer.Color{ .r = 0.18, .g = 0.18, .b = 0.2, .a = 0.6 };
     const loading_border = QuadRenderer.Color{ .r = 0.3, .g = 0.35, .b = 0.5, .a = 0.5 };
     const border_w: f32 = @floatCast(1.0 / self.camera.scale);
@@ -336,19 +342,19 @@ fn renderLoadingIndicators(self: *App) void {
     var region_it = world.regions.iterator();
     while (region_it.next()) |entry| {
         const region = entry.value_ptr;
-        if (region.pixels != null) continue; // already loaded
+        if (region.pixels != null) continue;
+
+        // Only draw indicators for visible regions
+        if (region.rx < min_rx or region.rx > max_rx or region.rz < min_rz or region.rz > max_rz) continue;
 
         const rx: f32 = @floatFromInt(@as(i32, region.rx) * 32);
         const rz: f32 = @floatFromInt(@as(i32, region.rz) * 32);
 
-        // Dark background
         self.quad_renderer.drawQuad(rx, rz, 32, 32, loading_bg);
-
-        // Border outline
-        self.quad_renderer.drawQuad(rx, rz, 32, border_w, loading_border); // top
-        self.quad_renderer.drawQuad(rx, rz + 32 - border_w, 32, border_w, loading_border); // bottom
-        self.quad_renderer.drawQuad(rx, rz, border_w, 32, loading_border); // left
-        self.quad_renderer.drawQuad(rx + 32 - border_w, rz, border_w, 32, loading_border); // right
+        self.quad_renderer.drawQuad(rx, rz, 32, border_w, loading_border);
+        self.quad_renderer.drawQuad(rx, rz + 32 - border_w, 32, border_w, loading_border);
+        self.quad_renderer.drawQuad(rx, rz, border_w, 32, loading_border);
+        self.quad_renderer.drawQuad(rx + 32 - border_w, rz, border_w, 32, loading_border);
     }
 }
 
@@ -608,13 +614,22 @@ fn keyCallback(glfw_window: ?*glfw.Window, key: c_int, _: c_int, action: c_int, 
                     app.allocator.free(p);
                 }
             } else if (key == glfw.GLFW_KEY_EQUAL) {
-                // + key: increase thread count
+                // + key: increase thread count (deferred to avoid blocking)
                 const cur = app.thread_pool.threadCount();
-                app.thread_pool.resize(@min(cur + 1, 64));
+                const active = app.thread_pool.active_count.load(.acquire);
+                if (active == 0) {
+                    app.thread_pool.resize(@min(cur + 1, 64));
+                } else {
+                    std.log.info("Cannot resize while loading ({d} active jobs)", .{active});
+                }
             } else if (key == glfw.GLFW_KEY_MINUS) {
-                // - key: decrease thread count
                 const cur = app.thread_pool.threadCount();
-                if (cur > 1) app.thread_pool.resize(cur - 1);
+                const active = app.thread_pool.active_count.load(.acquire);
+                if (active == 0 and cur > 1) {
+                    app.thread_pool.resize(cur - 1);
+                } else if (active > 0) {
+                    std.log.info("Cannot resize while loading ({d} active jobs)", .{active});
+                }
             } else if (key == glfw.GLFW_KEY_1) {
                 app.switchDimension(.overworld);
             } else if (key == glfw.GLFW_KEY_2) {
