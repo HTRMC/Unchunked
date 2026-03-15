@@ -15,7 +15,8 @@ pub const PIXEL_DATA_SIZE = REGION_PX * REGION_PX * 4;
 rx: i32,
 rz: i32,
 chunks: [32][32]ChunkState = .{.{.absent} ** 32} ** 32,
-pixels: ?[]u8 = null, // 512*512*4 RGBA8
+pixels: ?[]u8 = null,
+loading: bool = false,
 
 pub fn loadFromHeader(rx: i32, rz: i32, header: *const mca.RegionHeader) Region {
     var region = Region{

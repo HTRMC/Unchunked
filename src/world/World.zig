@@ -46,7 +46,8 @@ dimension: Dimension = .overworld,
 regions: RegionMap,
 allocator: std.mem.Allocator,
 io: Io,
-region_dir_path: ?[]u8 = null, // cached for on-demand loading
+region_dir_path: ?[]u8 = null,
+bg_jobs: [MAX_BG_JOBS]?*BgJob = .{null} ** MAX_BG_JOBS,
 
 pub fn init(allocator: std.mem.Allocator, io: Io, path: []const u8) World {
     return .{
@@ -58,6 +59,7 @@ pub fn init(allocator: std.mem.Allocator, io: Io, path: []const u8) World {
 }
 
 pub fn deinit(self: *World) void {
+    self.waitForBgJobs();
     var it = self.regions.valueIterator();
     while (it.next()) |region| {
         region.deinit(self.allocator);
@@ -66,8 +68,19 @@ pub fn deinit(self: *World) void {
     if (self.region_dir_path) |p| self.allocator.free(p);
 }
 
+fn waitForBgJobs(self: *World) void {
+    for (&self.bg_jobs) |*slot| {
+        const job = slot.* orelse continue;
+        if (job.thread) |t| t.join();
+        self.allocator.free(job.mca_path);
+        self.allocator.destroy(job);
+        slot.* = null;
+    }
+}
+
 /// Phase 1: Scan directory for region files and read headers only (fast, no pixel loading)
 pub fn scanRegions(self: *World) !void {
+    self.waitForBgJobs();
     var cleanup_it = self.regions.valueIterator();
     while (cleanup_it.next()) |region| {
         region.deinit(self.allocator);
@@ -104,23 +117,26 @@ pub fn scanRegions(self: *World) !void {
     std.log.info("Scanned {} regions for {s}", .{ self.regions.count(), @tagName(self.dimension) });
 }
 
-const MAX_LOAD_BATCH = 16; // max regions to load per frame
-const MAX_THREADS = 16;
+const MAX_BG_JOBS = 8;
 
-const RegionJob = struct {
+const BgJob = struct {
     region: *Region,
     header: mca.RegionHeader,
     mca_path: []u8,
     allocator: std.mem.Allocator,
+    key: RegionKey,
+    thread: ?std.Thread = null,
+    done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 };
 
-fn regionWorker(job: *RegionJob) void {
+fn bgWorker(job: *BgJob) void {
     const io = Io.Threaded.global_single_threaded.io();
     job.region.loadPixels(job.allocator, io, job.mca_path, &job.header);
+    job.done.store(true, .release);
 }
 
-/// Phase 2: Load pixels for visible regions that haven't been loaded yet.
-/// Returns list of newly loaded region keys for atlas upload.
+/// Called each frame: spawns background loaders for visible unloaded regions,
+/// and collects completed ones into new_keys for atlas upload.
 pub fn loadVisibleRegions(
     self: *World,
     min_rx: i32,
@@ -129,24 +145,45 @@ pub fn loadVisibleRegions(
     max_rz: i32,
     new_keys: *std.ArrayListUnmanaged(RegionKey),
 ) void {
+    // Collect completed background jobs
+    for (&self.bg_jobs) |*slot| {
+        const job = slot.* orelse continue;
+        if (!job.done.load(.acquire)) continue;
+
+        // Join thread
+        if (job.thread) |t| t.join();
+
+        // Report completion
+        if (job.region.pixels != null) {
+            new_keys.append(self.allocator, job.key) catch {};
+        }
+
+        // Clean up
+        self.allocator.free(job.mca_path);
+        self.allocator.destroy(job);
+        slot.* = null;
+    }
+
+    // Count active jobs
+    var active: u32 = 0;
+    for (self.bg_jobs) |slot| {
+        if (slot != null) active += 1;
+    }
+
+    // Spawn new jobs for visible unloaded regions
     const region_path = self.region_dir_path orelse return;
 
-    var jobs: [MAX_LOAD_BATCH]RegionJob = undefined;
-    var job_keys: [MAX_LOAD_BATCH]RegionKey = undefined;
-    var job_count: u32 = 0;
-
-    // Find visible regions that need loading
     var rx = min_rx;
     while (rx <= max_rx) : (rx += 1) {
         var rz = min_rz;
         while (rz <= max_rz) : (rz += 1) {
-            if (job_count >= MAX_LOAD_BATCH) break;
+            if (active >= MAX_BG_JOBS) return;
 
             const key = RegionKey{ .x = rx, .z = rz };
             const region = self.regions.getPtr(key) orelse continue;
-            if (region.pixels != null) continue; // already loaded
+            if (region.pixels != null) continue;
+            if (region.loading) continue;
 
-            // Read header for this region
             const mca_path = std.fmt.allocPrint(self.allocator, "{s}{c}r.{d}.{d}.mca", .{
                 region_path, std.fs.path.sep, rx, rz,
             }) catch continue;
@@ -156,36 +193,42 @@ pub fn loadVisibleRegions(
                 continue;
             };
 
-            jobs[job_count] = .{
+            const job = self.allocator.create(BgJob) catch {
+                self.allocator.free(mca_path);
+                continue;
+            };
+            job.* = .{
                 .region = region,
                 .header = header,
                 .mca_path = mca_path,
                 .allocator = self.allocator,
+                .key = key,
             };
-            job_keys[job_count] = key;
-            job_count += 1;
+
+            // Find free slot
+            var found_slot = false;
+            for (&self.bg_jobs) |*slot| {
+                if (slot.* == null) {
+                    slot.* = job;
+                    found_slot = true;
+                    break;
+                }
+            }
+            if (!found_slot) {
+                self.allocator.free(mca_path);
+                self.allocator.destroy(job);
+                continue;
+            }
+
+            region.loading = true;
+            job.thread = std.Thread.spawn(.{}, bgWorker, .{job}) catch {
+                region.loading = false;
+                self.allocator.free(mca_path);
+                self.allocator.destroy(job);
+                continue;
+            };
+            active += 1;
         }
-        if (job_count >= MAX_LOAD_BATCH) break;
-    }
-
-    if (job_count == 0) return;
-
-    // Spawn threads
-    var threads: [MAX_LOAD_BATCH]?std.Thread = .{null} ** MAX_LOAD_BATCH;
-    for (0..job_count) |i| {
-        threads[i] = std.Thread.spawn(.{}, regionWorker, .{&jobs[i]}) catch null;
-    }
-
-    for (0..job_count) |i| {
-        if (threads[i]) |t| t.join();
-    }
-
-    // Collect newly loaded keys and clean up paths
-    for (0..job_count) |i| {
-        if (jobs[i].region.pixels != null) {
-            new_keys.append(self.allocator, job_keys[i]) catch {};
-        }
-        self.allocator.free(jobs[i].mca_path);
     }
 }
 
