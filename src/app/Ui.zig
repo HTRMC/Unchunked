@@ -41,8 +41,9 @@ pub fn render(
     renderStatusBar(qr, tr, state, world, camera, selection, mouse_x, mouse_y, viewport_w, viewport_h);
 }
 
-const TAB_COLOR = QuadRenderer.Color{ .r = 0.2, .g = 0.2, .b = 0.2, .a = 0.9 };
-const TAB_ACTIVE_COLOR = QuadRenderer.Color{ .r = 0.3, .g = 0.3, .b = 0.35, .a = 1.0 };
+const TAB_COLOR = QuadRenderer.Color{ .r = 0.22, .g = 0.22, .b = 0.24, .a = 0.95 };
+const TAB_ACTIVE_COLOR = QuadRenderer.Color{ .r = 0.32, .g = 0.32, .b = 0.38, .a = 1.0 };
+const TAB_TEXT_INACTIVE = TextRenderer.Color{ .r = 0.75, .g = 0.75, .b = 0.75, .a = 1.0 };
 const TAB_TEXT_ACTIVE = TextRenderer.Color{ .r = 1.0, .g = 1.0, .b = 1.0, .a = 1.0 };
 
 fn renderToolbar(
@@ -90,7 +91,7 @@ fn renderToolbar(
             qr.drawQuad(x_pos, tab_y, tab_w, tab_h, if (is_active) TAB_ACTIVE_COLOR else TAB_COLOR);
 
             const tab_text_y = tab_y + (tab_h - tr.font_line_height * SMALL_TEXT_SCALE) / 2;
-            tr.drawText(tab_name, x_pos + tab_pad, tab_text_y, SMALL_TEXT_SCALE, if (is_active) TAB_TEXT_ACTIVE else DIM_TEXT_COLOR);
+            tr.drawText(tab_name, x_pos + tab_pad, tab_text_y, SMALL_TEXT_SCALE, if (is_active) TAB_TEXT_ACTIVE else TAB_TEXT_INACTIVE);
 
             x_pos += tab_w + 2;
         }
