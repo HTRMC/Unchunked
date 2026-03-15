@@ -86,7 +86,8 @@ pub fn deinit(self: *App) void {
 pub fn openWorld(self: *App, path: []const u8) void {
     if (self.world) |*w| w.deinit();
 
-    self.world = World.init(self.allocator, self.io, path);
+    const owned_path = self.allocator.dupe(u8, path) catch return;
+    self.world = World.init(self.allocator, self.io, owned_path);
     self.world.?.scanRegions() catch |err| {
         std.log.err("Failed to scan regions: {}", .{err});
         self.world.?.deinit();

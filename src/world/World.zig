@@ -41,7 +41,7 @@ const RegionKeyContext = struct {
     }
 };
 
-path: []const u8,
+path: []u8,
 dimension: Dimension = .overworld,
 regions: RegionMap,
 allocator: std.mem.Allocator,
@@ -49,7 +49,7 @@ io: Io,
 region_dir_path: ?[]u8 = null,
 bg_jobs: [MAX_BG_JOBS]?*BgJob = .{null} ** MAX_BG_JOBS,
 
-pub fn init(allocator: std.mem.Allocator, io: Io, path: []const u8) World {
+pub fn init(allocator: std.mem.Allocator, io: Io, path: []u8) World {
     return .{
         .path = path,
         .regions = RegionMap.init(allocator),
@@ -66,6 +66,7 @@ pub fn deinit(self: *World) void {
     }
     self.regions.deinit();
     if (self.region_dir_path) |p| self.allocator.free(p);
+    self.allocator.free(self.path);
 }
 
 fn waitForBgJobs(self: *World) void {

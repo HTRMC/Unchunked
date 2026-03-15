@@ -6,13 +6,13 @@ const Region = @import("../world/Region.zig");
 
 const TileRenderer = @This();
 
-const MAX_TILES = 64;
+const MAX_TILES = 256;
 const VERTICES_PER_TILE = 6;
 const MAX_VERTICES = MAX_TILES * VERTICES_PER_TILE;
 
-// Atlas: 8x8 grid of 512x512 tiles = 4096x4096
-const ATLAS_COLS = 8;
-const ATLAS_ROWS = 8;
+// Atlas: 16x16 grid of 512x512 tiles = 8192x8192
+const ATLAS_COLS = 16;
+const ATLAS_ROWS = 16;
 const TILE_PX = Region.REGION_PX;
 const ATLAS_PX = ATLAS_COLS * TILE_PX;
 
@@ -235,7 +235,6 @@ fn findSlot(self: *const TileRenderer, rx: i32, rz: i32) ?u32 {
 fn findOrAllocSlot(self: *TileRenderer, rx: i32, rz: i32) ?u32 {
     if (self.findSlot(rx, rz)) |s| return s;
 
-    // Find free slot
     for (0..MAX_TILES) |i| {
         if (!self.slot_used[i]) {
             self.slot_used[i] = true;
@@ -244,18 +243,6 @@ fn findOrAllocSlot(self: *TileRenderer, rx: i32, rz: i32) ?u32 {
         }
     }
 
-    // Atlas full — evict an off-screen slot
-    for (0..MAX_TILES) |i| {
-        const k = self.slot_keys[i];
-        if (k.rx < self.visible_min_rx or k.rx > self.visible_max_rx or
-            k.rz < self.visible_min_rz or k.rz > self.visible_max_rz)
-        {
-            self.slot_keys[i] = .{ .rx = rx, .rz = rz };
-            return @intCast(i);
-        }
-    }
-
-    // All slots are visible — can't evict
     return null;
 }
 
