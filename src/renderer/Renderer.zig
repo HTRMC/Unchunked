@@ -399,7 +399,7 @@ fn createSwapchain(self: *Renderer, width: u32, height: u32) !void {
 
     var chosen_format = formats[0];
     for (formats[0..fc]) |fmt| {
-        if (fmt.format == vk.VK_FORMAT_B8G8R8A8_SRGB and fmt.colorSpace == vk.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+        if (fmt.format == vk.VK_FORMAT_B8G8R8A8_UNORM and fmt.colorSpace == vk.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             chosen_format = fmt;
             break;
         }
