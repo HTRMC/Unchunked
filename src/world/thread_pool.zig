@@ -47,7 +47,7 @@ pub const ThreadPool = struct {
 
     pub fn deinit(self: *ThreadPool) void {
         self.shutdown.store(true, .release);
-        for (self.threads) |t| t.join();
+        for (self.threads) |t| t.detach();
         self.allocator.free(self.threads);
         self.allocator.free(self.slots);
     }

@@ -72,8 +72,7 @@ pub fn init(allocator: std.mem.Allocator, io: Io, path: []u8, pool: *ThreadPool)
 }
 
 pub fn deinit(self: *World) void {
-    self.pool.waitIdle();
-    // Clean up any pending jobs
+    // Don't wait — just clean up pending jobs (pool shutdown handles thread joining)
     for (&self.pending_jobs) |*slot| {
         if (slot.*) |job| {
             self.allocator.free(job.mca_path);
