@@ -295,6 +295,24 @@ pub fn update(self: *App) !void {
     try self.renderer.endFrame(ctx);
 }
 
+fn resetPendingJobs(self: *App) void {
+    const world = &(self.world orelse return);
+    for (&world.pending_jobs) |*slot| {
+        const job = slot.* orelse continue;
+        // Job was completed by the old pool (join waited for it)
+        // or was never picked up (queue cleared)
+        if (job.done.load(.acquire)) {
+            // Completed — just didn't get collected yet, pixels are set
+        } else {
+            // Never ran — reset loading flag so it gets resubmitted
+            job.region.loading = false;
+        }
+        self.allocator.free(job.mca_path);
+        self.allocator.destroy(job);
+        slot.* = null;
+    }
+}
+
 fn processRegionLoading(self: *App) void {
     const world = &(self.world orelse return);
 
@@ -614,21 +632,14 @@ fn keyCallback(glfw_window: ?*glfw.Window, key: c_int, _: c_int, action: c_int, 
                     app.allocator.free(p);
                 }
             } else if (key == glfw.GLFW_KEY_EQUAL) {
-                // + key: increase thread count (deferred to avoid blocking)
                 const cur = app.thread_pool.threadCount();
-                const active = app.thread_pool.active_count.load(.acquire);
-                if (active == 0) {
-                    app.thread_pool.resize(@min(cur + 1, 64));
-                } else {
-                    std.log.info("Cannot resize while loading ({d} active jobs)", .{active});
-                }
+                app.thread_pool.resize(@min(cur + 1, 64));
+                app.resetPendingJobs();
             } else if (key == glfw.GLFW_KEY_MINUS) {
                 const cur = app.thread_pool.threadCount();
-                const active = app.thread_pool.active_count.load(.acquire);
-                if (active == 0 and cur > 1) {
+                if (cur > 1) {
                     app.thread_pool.resize(cur - 1);
-                } else if (active > 0) {
-                    std.log.info("Cannot resize while loading ({d} active jobs)", .{active});
+                    app.resetPendingJobs();
                 }
             } else if (key == glfw.GLFW_KEY_1) {
                 app.switchDimension(.overworld);
