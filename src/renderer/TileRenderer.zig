@@ -54,6 +54,7 @@ graphics_queue: vk.VkQueue = null,
 // Slot allocation
 slot_used: [MAX_TILES]bool = .{false} ** MAX_TILES,
 slot_keys: [MAX_TILES]RegionKey = .{RegionKey{ .rx = 0, .rz = 0 }} ** MAX_TILES,
+next_evict: u32 = 0,
 
 const RegionKey = struct { rx: i32, rz: i32 };
 
@@ -222,7 +223,6 @@ fn findSlot(self: *const TileRenderer, rx: i32, rz: i32) ?u32 {
 }
 
 fn findOrAllocSlot(self: *TileRenderer, rx: i32, rz: i32) ?u32 {
-    // Check if already allocated
     if (self.findSlot(rx, rz)) |s| return s;
 
     // Find free slot
@@ -233,7 +233,13 @@ fn findOrAllocSlot(self: *TileRenderer, rx: i32, rz: i32) ?u32 {
             return @intCast(i);
         }
     }
-    return null;
+
+    // Atlas full — evict slot 0 (simple round-robin eviction)
+    // Shift eviction index to spread evictions
+    const evict = self.next_evict % MAX_TILES;
+    self.next_evict += 1;
+    self.slot_keys[evict] = .{ .rx = rx, .rz = rz };
+    return @intCast(evict);
 }
 
 fn createAtlas(self: *TileRenderer, renderer: *Renderer) !void {

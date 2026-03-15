@@ -98,19 +98,11 @@ pub fn openWorld(self: *App, path: []const u8) void {
     self.selection.clear();
     self.camera.center_x = 0;
     self.camera.center_z = 0;
-
-    // Upload region pixel data to tile renderer atlas
     self.tile_renderer.clearSlots();
-    var it = self.world.?.regions.iterator();
-    while (it.next()) |entry| {
-        const region = entry.value_ptr;
-        if (region.pixels) |px| {
-            self.tile_renderer.uploadRegion(region.rx, region.rz, px);
-        }
-    }
 
-    std.log.info("Opened world: {s} ({} chunks)", .{
+    std.log.info("Opened world: {s} ({} regions, {} chunks)", .{
         World.extractWorldName(path),
+        self.world.?.regions.count(),
         self.world.?.totalChunkCount(),
     });
 }
@@ -125,20 +117,11 @@ pub fn switchDimension(self: *App, dim: World.Dimension) void {
     };
 
     self.selection.clear();
-
-    // Re-upload region pixel data
     self.tile_renderer.clearSlots();
-    var it = world.regions.iterator();
-    while (it.next()) |entry| {
-        const region = entry.value_ptr;
-        if (region.pixels) |px| {
-            self.tile_renderer.uploadRegion(region.rx, region.rz, px);
-        }
-    }
 
-    std.log.info("Switched to {s} ({} chunks)", .{
+    std.log.info("Switched to {s} ({} regions)", .{
         @tagName(dim),
-        world.totalChunkCount(),
+        world.regions.count(),
     });
 }
 
@@ -296,11 +279,37 @@ pub fn update(self: *App) !void {
 fn renderTileMap(self: *App) void {
     const world = &(self.world orelse return);
 
-    var it = world.regions.iterator();
-    while (it.next()) |entry| {
-        const region = entry.value_ptr;
-        if (region.pixels != null) {
-            self.tile_renderer.drawRegion(region.rx, region.rz);
+    // Determine visible region range from camera
+    const range = self.camera.visibleChunkRange();
+    const min_rx = @divFloor(range.min_x, 32);
+    const max_rx = @divFloor(range.max_x, 32);
+    const min_rz = @divFloor(range.min_z, 32);
+    const max_rz = @divFloor(range.max_z, 32);
+
+    // Load any visible regions that haven't been loaded yet
+    var new_keys: std.ArrayListUnmanaged(World.RegionKey) = .empty;
+    defer new_keys.deinit(self.allocator);
+    world.loadVisibleRegions(min_rx, max_rx, min_rz, max_rz, &new_keys);
+
+    // Upload newly loaded regions to the tile atlas
+    for (new_keys.items) |key| {
+        if (world.getRegion(key.x, key.z)) |region| {
+            if (region.pixels) |px| {
+                self.tile_renderer.uploadRegion(key.x, key.z, px);
+            }
+        }
+    }
+
+    // Draw all visible regions that have pixels uploaded
+    var rx = min_rx;
+    while (rx <= max_rx) : (rx += 1) {
+        var rz = min_rz;
+        while (rz <= max_rz) : (rz += 1) {
+            if (world.getRegion(rx, rz)) |region| {
+                if (region.pixels != null) {
+                    self.tile_renderer.drawRegion(rx, rz);
+                }
+            }
         }
     }
 }

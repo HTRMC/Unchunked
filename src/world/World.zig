@@ -46,6 +46,7 @@ dimension: Dimension = .overworld,
 regions: RegionMap,
 allocator: std.mem.Allocator,
 io: Io,
+region_dir_path: ?[]u8 = null, // cached for on-demand loading
 
 pub fn init(allocator: std.mem.Allocator, io: Io, path: []const u8) World {
     return .{
@@ -62,33 +63,21 @@ pub fn deinit(self: *World) void {
         region.deinit(self.allocator);
     }
     self.regions.deinit();
+    if (self.region_dir_path) |p| self.allocator.free(p);
 }
 
-const MAX_REGIONS = 64;
-
-const RegionJob = struct {
-    region: *Region,
-    header: mca.RegionHeader,
-    mca_path: []const u8,
-    allocator: std.mem.Allocator,
-};
-
-fn regionWorker(job: *RegionJob) void {
-    // Use thread-safe Io for file operations in worker threads
-    const io = Io.Threaded.global_single_threaded.io();
-    job.region.loadPixels(job.allocator, io, job.mca_path, &job.header);
-}
-
+/// Phase 1: Scan directory for region files and read headers only (fast, no pixel loading)
 pub fn scanRegions(self: *World) !void {
-    // Free old region pixel data before clearing
     var cleanup_it = self.regions.valueIterator();
     while (cleanup_it.next()) |region| {
         region.deinit(self.allocator);
     }
     self.regions.clearRetainingCapacity();
 
-    const region_path = try self.buildRegionPath();
-    defer self.allocator.free(region_path);
+    if (self.region_dir_path) |p| self.allocator.free(p);
+    self.region_dir_path = try self.buildRegionPath();
+
+    const region_path = self.region_dir_path.?;
 
     var dir = Dir.openDir(.cwd(), self.io, region_path, .{ .iterate = true }) catch |err| {
         std.log.warn("Cannot open region directory: {s} ({})", .{ region_path, err });
@@ -96,56 +85,93 @@ pub fn scanRegions(self: *World) !void {
     };
     defer dir.close(self.io);
 
-    // Phase 1: Scan directory, read headers, insert regions (main thread)
-    var headers: [MAX_REGIONS]mca.RegionHeader = undefined;
-    var keys: [MAX_REGIONS]RegionKey = undefined;
-    var paths: [MAX_REGIONS][]u8 = undefined;
-    var job_count: u32 = 0;
-
     var iter = dir.iterate();
     while (iter.next(self.io) catch null) |entry| {
-        if (job_count >= MAX_REGIONS) break;
         if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.name, ".mca")) continue;
 
-        const name = entry.name;
-        if (!std.mem.endsWith(u8, name, ".mca")) continue;
+        const parsed = mca.parseRegionFilename(entry.name) orelse continue;
 
-        const parsed = mca.parseRegionFilename(name) orelse continue;
+        const mca_path = std.fmt.allocPrint(self.allocator, "{s}{c}{s}", .{ region_path, std.fs.path.sep, entry.name }) catch continue;
+        defer self.allocator.free(mca_path);
 
-        const path = std.fmt.allocPrint(self.allocator, "{s}{c}{s}", .{ region_path, std.fs.path.sep, name }) catch continue;
-
-        const header = mca.readRegionHeader(self.io, path) catch |err| {
-            std.log.warn("Failed to read {s}: {}", .{ name, err });
-            self.allocator.free(path);
-            continue;
-        };
-
+        const header = mca.readRegionHeader(self.io, mca_path) catch continue;
         const region = Region.loadFromHeader(parsed.x, parsed.z, &header);
         const key = RegionKey{ .x = parsed.x, .z = parsed.z };
-        self.regions.put(key, region) catch {
-            self.allocator.free(path);
-            continue;
-        };
-
-        headers[job_count] = header;
-        keys[job_count] = key;
-        paths[job_count] = path;
-        job_count += 1;
+        self.regions.put(key, region) catch continue;
     }
 
-    // Phase 2: Build jobs with stable pointers (all inserts are done)
-    var jobs: [MAX_REGIONS]RegionJob = undefined;
-    for (0..job_count) |i| {
-        jobs[i] = .{
-            .region = self.regions.getPtr(keys[i]).?,
-            .header = headers[i],
-            .mca_path = paths[i],
-            .allocator = self.allocator,
-        };
+    std.log.info("Scanned {} regions for {s}", .{ self.regions.count(), @tagName(self.dimension) });
+}
+
+const MAX_LOAD_BATCH = 16; // max regions to load per frame
+const MAX_THREADS = 16;
+
+const RegionJob = struct {
+    region: *Region,
+    header: mca.RegionHeader,
+    mca_path: []u8,
+    allocator: std.mem.Allocator,
+};
+
+fn regionWorker(job: *RegionJob) void {
+    const io = Io.Threaded.global_single_threaded.io();
+    job.region.loadPixels(job.allocator, io, job.mca_path, &job.header);
+}
+
+/// Phase 2: Load pixels for visible regions that haven't been loaded yet.
+/// Returns list of newly loaded region keys for atlas upload.
+pub fn loadVisibleRegions(
+    self: *World,
+    min_rx: i32,
+    max_rx: i32,
+    min_rz: i32,
+    max_rz: i32,
+    new_keys: *std.ArrayListUnmanaged(RegionKey),
+) void {
+    const region_path = self.region_dir_path orelse return;
+
+    var jobs: [MAX_LOAD_BATCH]RegionJob = undefined;
+    var job_keys: [MAX_LOAD_BATCH]RegionKey = undefined;
+    var job_count: u32 = 0;
+
+    // Find visible regions that need loading
+    var rx = min_rx;
+    while (rx <= max_rx) : (rx += 1) {
+        var rz = min_rz;
+        while (rz <= max_rz) : (rz += 1) {
+            if (job_count >= MAX_LOAD_BATCH) break;
+
+            const key = RegionKey{ .x = rx, .z = rz };
+            const region = self.regions.getPtr(key) orelse continue;
+            if (region.pixels != null) continue; // already loaded
+
+            // Read header for this region
+            const mca_path = std.fmt.allocPrint(self.allocator, "{s}{c}r.{d}.{d}.mca", .{
+                region_path, std.fs.path.sep, rx, rz,
+            }) catch continue;
+
+            const header = mca.readRegionHeader(self.io, mca_path) catch {
+                self.allocator.free(mca_path);
+                continue;
+            };
+
+            jobs[job_count] = .{
+                .region = region,
+                .header = header,
+                .mca_path = mca_path,
+                .allocator = self.allocator,
+            };
+            job_keys[job_count] = key;
+            job_count += 1;
+        }
+        if (job_count >= MAX_LOAD_BATCH) break;
     }
 
-    // Phase 3: Load pixels in parallel (worker threads, CPU-intensive)
-    var threads: [MAX_REGIONS]?std.Thread = .{null} ** MAX_REGIONS;
+    if (job_count == 0) return;
+
+    // Spawn threads
+    var threads: [MAX_LOAD_BATCH]?std.Thread = .{null} ** MAX_LOAD_BATCH;
     for (0..job_count) |i| {
         threads[i] = std.Thread.spawn(.{}, regionWorker, .{&jobs[i]}) catch null;
     }
@@ -154,12 +180,13 @@ pub fn scanRegions(self: *World) !void {
         if (threads[i]) |t| t.join();
     }
 
-    // Clean up paths
+    // Collect newly loaded keys and clean up paths
     for (0..job_count) |i| {
-        self.allocator.free(paths[i]);
+        if (jobs[i].region.pixels != null) {
+            new_keys.append(self.allocator, job_keys[i]) catch {};
+        }
+        self.allocator.free(jobs[i].mca_path);
     }
-
-    std.log.info("Loaded {} regions for {s} ({} threads)", .{ self.regions.count(), @tagName(self.dimension), job_count });
 }
 
 pub fn setDimension(self: *World, dim: Dimension) !void {
@@ -178,7 +205,6 @@ pub fn getRegionMut(self: *World, rx: i32, rz: i32) ?*Region {
 }
 
 pub fn deleteChunks(self: *World, chunks: []const Selection.ChunkCoord) !u32 {
-    // Group chunks by region
     var region_chunks = std.AutoHashMap(RegionKey, std.ArrayListUnmanaged(mca.LocalChunk)).init(self.allocator);
     defer {
         var it = region_chunks.valueIterator();
@@ -207,31 +233,25 @@ pub fn deleteChunks(self: *World, chunks: []const Selection.ChunkCoord) !u32 {
         const rkey = entry.key_ptr.*;
         const chunk_list = entry.value_ptr.items;
 
-        // Build MCA path
-        const region_path = try self.buildRegionPath();
-        defer self.allocator.free(region_path);
-
+        const region_path = self.region_dir_path orelse continue;
         const sep = std.fs.path.sep;
 
-        const mca_path = try std.fmt.allocPrint(self.allocator, "{s}{c}r.{d}.{d}.mca", .{ region_path, sep, rkey.x, rkey.z });
+        const mca_path = std.fmt.allocPrint(self.allocator, "{s}{c}r.{d}.{d}.mca", .{ region_path, sep, rkey.x, rkey.z }) catch continue;
         defer self.allocator.free(mca_path);
 
-        // Delete from MCA
         mca.deleteChunks(self.io, mca_path, chunk_list) catch |err| {
             std.log.warn("Failed to delete chunks from r.{d}.{d}.mca: {}", .{ rkey.x, rkey.z, err });
             continue;
         };
 
-        // Also try to delete from .entities and .poi directories
         for ([_][]const u8{ "entities", "poi" }) |sub| {
-            const parent_path = try self.buildDimensionPath();
+            const parent_path = self.buildDimensionPath() catch continue;
             defer self.allocator.free(parent_path);
             const sub_path = std.fmt.allocPrint(self.allocator, "{s}{c}{s}{c}r.{d}.{d}.mca", .{ parent_path, sep, sub, sep, rkey.x, rkey.z }) catch continue;
             defer self.allocator.free(sub_path);
             mca.deleteChunks(self.io, sub_path, chunk_list) catch {};
         }
 
-        // Update in-memory model
         if (self.getRegionMut(rkey.x, rkey.z)) |region| {
             for (chunk_list) |lc| {
                 region.setChunkAbsent(lc.x, lc.z);
@@ -252,7 +272,7 @@ pub fn totalChunkCount(self: *const World) u32 {
     return count;
 }
 
-fn buildRegionPath(self: *const World) ![]const u8 {
+fn buildRegionPath(self: *const World) ![]u8 {
     return try std.fmt.allocPrint(self.allocator, "{s}{c}{s}", .{ self.path, std.fs.path.sep, self.dimension.regionPath() });
 }
 
