@@ -269,9 +269,8 @@ fn createAtlas(self: *TileRenderer, renderer: *Renderer) !void {
     }, null);
     try vk.bindImageMemory(self.device, self.atlas_image, self.atlas_memory, 0);
 
-    // Transition to TRANSFER_DST_OPTIMAL (stays in this layout for uploads, shader reads work via GENERAL or we transition per-frame)
-    // Actually, let's transition to GENERAL which allows both transfer dst and shader read
-    try self.transitionAtlas(renderer, vk.VK_IMAGE_LAYOUT_UNDEFINED, vk.c.VK_IMAGE_LAYOUT_GENERAL);
+    // Transition to GENERAL and clear to transparent black
+    try self.transitionAndClearAtlas(renderer);
 
     self.atlas_image_view = try vk.createImageView(self.device, &.{
         .sType = vk.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -317,6 +316,54 @@ fn createAtlas(self: *TileRenderer, renderer: *Renderer) !void {
     }, null);
 
     std.log.info("Tile atlas created: {}x{} ({} slots)", .{ ATLAS_PX, ATLAS_PX, MAX_TILES });
+}
+
+fn transitionAndClearAtlas(self: *TileRenderer, renderer: *Renderer) !void {
+    var cmd: vk.VkCommandBuffer = null;
+    try vk.allocateCommandBuffers(self.device, &.{
+        .sType = vk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .pNext = null,
+        .commandPool = renderer.command_pool, .level = vk.VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1,
+    }, @ptrCast(&cmd));
+
+    try vk.beginCommandBuffer(cmd, &.{
+        .sType = vk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .pNext = null,
+        .flags = vk.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, .pInheritanceInfo = null,
+    });
+
+    const subresource_range: vk.VkImageSubresourceRange = .{
+        .aspectMask = vk.VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1,
+    };
+
+    // UNDEFINED → TRANSFER_DST
+    vk.cmdPipelineBarrier(cmd, vk.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, vk.VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, null, 0, null, 1, @ptrCast(&vk.VkImageMemoryBarrier{
+        .sType = vk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .pNext = null,
+        .srcAccessMask = 0, .dstAccessMask = vk.VK_ACCESS_TRANSFER_WRITE_BIT,
+        .oldLayout = vk.VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = vk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .srcQueueFamilyIndex = vk.VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = vk.VK_QUEUE_FAMILY_IGNORED,
+        .image = self.atlas_image, .subresourceRange = subresource_range,
+    }));
+
+    // Clear to transparent black
+    const clear_color: vk.VkClearColorValue = .{ .float32 = .{ 0, 0, 0, 0 } };
+    vk.cmdClearColorImage(cmd, self.atlas_image, vk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_color, 1, @ptrCast(&subresource_range));
+
+    // TRANSFER_DST → GENERAL
+    vk.cmdPipelineBarrier(cmd, vk.VK_PIPELINE_STAGE_TRANSFER_BIT, vk.VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, null, 0, null, 1, @ptrCast(&vk.VkImageMemoryBarrier{
+        .sType = vk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .pNext = null,
+        .srcAccessMask = vk.VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = 0,
+        .oldLayout = vk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, .newLayout = vk.c.VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = vk.VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = vk.VK_QUEUE_FAMILY_IGNORED,
+        .image = self.atlas_image, .subresourceRange = subresource_range,
+    }));
+
+    try vk.endCommandBuffer(cmd);
+    try vk.queueSubmit(renderer.graphics_queue, 1, @ptrCast(&vk.VkSubmitInfo{
+        .sType = vk.VK_STRUCTURE_TYPE_SUBMIT_INFO, .pNext = null,
+        .waitSemaphoreCount = 0, .pWaitSemaphores = null, .pWaitDstStageMask = null,
+        .commandBufferCount = 1, .pCommandBuffers = @ptrCast(&cmd),
+        .signalSemaphoreCount = 0, .pSignalSemaphores = null,
+    }), null);
+    try vk.deviceWaitIdle(self.device);
 }
 
 fn transitionAtlas(self: *TileRenderer, renderer: *Renderer, old_layout: c_uint, new_layout: c_uint) !void {
