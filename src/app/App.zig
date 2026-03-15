@@ -45,7 +45,7 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, environ_map: *std.process.
 
     // Default thread count: number of CPU cores, minimum 2
     const cpu_count = std.Thread.getCpuCount() catch 4;
-    const thread_count: u32 = @intCast(@max(2, @min(cpu_count, 32)));
+    const thread_count: u32 = @intCast(@max(2, cpu_count -| 2));
     const thread_pool = try allocator.create(World.ThreadPool);
     try thread_pool.init(allocator, thread_count);
 
