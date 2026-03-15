@@ -236,7 +236,7 @@ pub fn generateAtlas() [ATLAS_WIDTH * ATLAS_HEIGHT]u8 {
             for (0..GLYPH_WIDTH) |gx| {
                 const px = base_x + gx;
                 const py = base_y + gy;
-                const mask: u8 = @as(u8, 0x80) >> @intCast(gx);
+                const mask: u8 = @as(u8, 1) << @intCast(gx);
                 atlas[py * ATLAS_WIDTH + px] = if (bits & mask != 0) 0xFF else 0x00;
             }
         }
