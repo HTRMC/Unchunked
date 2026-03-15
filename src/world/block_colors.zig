@@ -11,8 +11,17 @@ pub fn heightToGreen(height: u8) Color {
     return .{ .r = r, .g = g, .b = b };
 }
 
+pub fn isWater(name: []const u8) bool {
+    const stripped = if (std.mem.startsWith(u8, name, "minecraft:"))
+        name["minecraft:".len..]
+    else
+        name;
+    return std.mem.eql(u8, stripped, "water") or std.mem.eql(u8, stripped, "flowing_water");
+}
+
 /// Returns true for blocks that should be skipped when finding the top solid block.
-/// Includes air, fluids, glass, leaves, flowers, small plants, redstone, rails, etc.
+/// Includes air, glass, leaves, flowers, small plants, redstone, rails, etc.
+/// Water/lava are NOT transparent — they are handled separately with blending.
 pub fn isTransparent(name: []const u8) bool {
     // Strip "minecraft:" prefix if present
     const stripped = if (std.mem.startsWith(u8, name, "minecraft:"))
@@ -25,9 +34,7 @@ pub fn isTransparent(name: []const u8) bool {
     if (std.mem.eql(u8, stripped, "cave_air")) return true;
     if (std.mem.eql(u8, stripped, "void_air")) return true;
 
-    // Fluids
-    if (std.mem.eql(u8, stripped, "water")) return true;
-    if (std.mem.eql(u8, stripped, "lava")) return true;
+    // Fluids — not transparent, rendered with their own color
 
     // Glass
     if (std.mem.eql(u8, stripped, "glass")) return true;

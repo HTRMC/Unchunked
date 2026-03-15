@@ -72,20 +72,89 @@ fn parseSections(reader: *NbtReader, pixels: *ChunkPixels, heights: *[16][16]i32
     // Sort by Y descending (top-down)
     sortSectionsDescending(sections[0..valid_sections]);
 
-    // For each X/Z column, find topmost non-transparent block
+    const DEFAULT_WATER_COLOR = block_colors.Color{ .r = 63, .g = 118, .b = 228 }; // 0x3F76E4
+
+    // For each X/Z column, find topmost block with water overlay support
     for (0..16) |z| {
         for (0..16) |x| {
+            var water_height: ?i32 = null;
+            var found = false;
+
             for (sections[0..valid_sections]) |*sec| {
-                if (findTopBlock(sec, @intCast(x), @intCast(z))) |result| {
-                    const color = block_colors.lookup(result.name) orelse
-                        block_colors.Color{ .r = 180, .g = 100, .b = 200 }; // purple for unknown
-                    pixels[z][x] = .{ color.r, color.g, color.b, 255 };
-                    heights[z][x] = @as(i32, sec.y) * 16 + result.local_y;
+                if (found) break;
+
+                const lx: u4 = @intCast(x);
+                const lz: u4 = @intCast(z);
+
+                // Scan Y levels in this section (top-down)
+                var y: i32 = 15;
+                while (y >= 0) : (y -= 1) {
+                    const block_name = getBlockAt(sec, lx, lz, y) orelse continue;
+
+                    if (block_colors.isTransparent(block_name)) continue;
+
+                    const abs_y = @as(i32, sec.y) * 16 + y;
+
+                    if (block_colors.isWater(block_name)) {
+                        // First water block sets water height
+                        if (water_height == null) {
+                            water_height = abs_y;
+                        }
+                        continue; // keep scanning for terrain below
+                    }
+
+                    // Solid terrain block found
+                    const terrain_color = block_colors.lookup(block_name) orelse
+                        block_colors.Color{ .r = 180, .g = 100, .b = 200 };
+                    heights[z][x] = abs_y;
+
+                    if (water_height) |wh| {
+                        // Blend water over terrain based on depth
+                        const depth = wh - abs_y;
+                        const ratio = 0.5 - 0.5 / 40.0 * @as(f32, @floatFromInt(@min(depth, 40)));
+                        const inv_ratio = 1.0 - ratio;
+
+                        const wr: f32 = @floatFromInt(DEFAULT_WATER_COLOR.r);
+                        const wg: f32 = @floatFromInt(DEFAULT_WATER_COLOR.g);
+                        const wb: f32 = @floatFromInt(DEFAULT_WATER_COLOR.b);
+                        const tr: f32 = @floatFromInt(terrain_color.r);
+                        const tg: f32 = @floatFromInt(terrain_color.g);
+                        const tb: f32 = @floatFromInt(terrain_color.b);
+
+                        pixels[z][x] = .{
+                            @intFromFloat(wr * inv_ratio + tr * ratio),
+                            @intFromFloat(wg * inv_ratio + tg * ratio),
+                            @intFromFloat(wb * inv_ratio + tb * ratio),
+                            255,
+                        };
+                    } else {
+                        pixels[z][x] = .{ terrain_color.r, terrain_color.g, terrain_color.b, 255 };
+                    }
+                    found = true;
                     break;
                 }
             }
+
+            // Water with no terrain below (deep ocean, void)
+            if (water_height != null and !found) {
+                pixels[z][x] = .{ DEFAULT_WATER_COLOR.r, DEFAULT_WATER_COLOR.g, DEFAULT_WATER_COLOR.b, 255 };
+                heights[z][x] = water_height.?;
+            }
         }
     }
+}
+
+fn getBlockAt(sec: *const SectionData, x: u4, z: u4, y: i32) ?[]const u8 {
+    if (sec.palette_count == 0) return null;
+    if (sec.palette_count == 1) return if (sec.palette_names[0].len > 0) sec.palette_names[0] else null;
+    if (sec.data_longs == 0) return null;
+
+    const block_index: u32 = @intCast(y * 256 + @as(i32, z) * 16 + @as(i32, x));
+    const palette_idx = getBlockIndex(sec, block_index) orelse return null;
+    if (palette_idx >= sec.palette_count) return null;
+
+    const name = sec.palette_names[palette_idx];
+    return if (name.len > 0) name else null;
 }
 
 const BlockResult = struct {
