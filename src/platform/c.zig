@@ -11,6 +11,7 @@ pub const c = @cImport({
 });
 
 pub const ft = @cImport({
+    @cDefine("_FORTIFY_SOURCE", "0");
     @cInclude("ft2build.h");
     @cInclude("freetype/freetype.h");
 });
